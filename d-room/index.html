@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<script>document.documentElement.classList.remove('no-js')</script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Превью для выбора варианта. Ссылка открывается у всех, кому её дали,
+     но в поисковую выдачу страница не попадает: это черновик, а не сайт. -->
+<meta name="robots" content="noindex, nofollow">
+<title>What Our Souls Are Made Of — a novel by RayDi Zhe</title>
+<meta name="description" content="Two loves. One lifelong friendship. One impossible choice. A New Adult romance by RayDi Zhe — completed novel, preparing for release.">
+<!-- OG-адрес прибит к artemzhzhenov.xyz/souls/; при переезде домена переписать -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://artemzhzhenov.github.io/souls-preview/">
+<meta property="og:title" content="What Our Souls Are Made Of">
+<meta property="og:description" content="Two loves. One lifelong friendship. One impossible choice. A New Adult romance by RayDi Zhe.">
+<meta property="og:image" content="https://artemzhzhenov.github.io/souls-preview/shared/img/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Tessa between Sam and Ethan in warm lamplight, above the title What Our Souls Are Made Of">
+<meta name="twitter:card" content="summary_large_image">
+<!-- Фавикон: спичка/пламя в янтаре на ночном фоне — свой знак, не архивный. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2314100D'/%3E%3Cpath d='M16 6c-4 6-4 11 0 15c4-4 4-9 0-15z' fill='%23D9A05B'/%3E%3Cpath d='M16 21v6' stroke='%23D9A05B' stroke-width='2' stroke-linecap='round' opacity='.55'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="../shared/base.css">
+<link rel="stylesheet" href="room.css">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<!-- Сцена. Для диктора её нет: всё содержание лежит в разметке ниже.
+     Пустой canvas остаётся пустым, если WebGL недоступен, — room.js
+     в этом случае просто не запускается и фолбэк-кадры не прячет. -->
+<canvas id="room" aria-hidden="true"></canvas>
+
+<nav class="nav" aria-label="Section">
+  <a href="#story">Story</a>
+  <a href="#cast">Cast</a>
+  <a href="#episodes">Episodes</a>
+  <a href="#author">Author</a>
+  <a href="#follow">Follow</a>
+</nav>
+
+<main id="main" tabindex="-1">
+
+  <!-- 1 · Титул -->
+  <section id="title" class="scene reveal">
+    <div class="wrap">
+      <h1 class="title">What Our Souls Are Made Of</h1>
+      <p class="byline">a novel by RayDi Zhe</p>
+      <figure class="shot">
+        <picture><source media="(max-width: 700px)" srcset="../shared/img/sm/rain-glass.jpg"><img fetchpriority="high" data-frame="rain" src="../shared/img/rain-glass.jpg" alt="Tessa and Sam face to face behind rain-streaked glass, lit gold" width="720" height="1280"></picture>
+      </figure>
+      <p class="line">Two loves. One lifelong friendship. One impossible choice.</p>
+      <p class="meta">Completed novel · preparing for release</p>
+      <p>
+        <a class="btn" data-link="facebook" href="https://www.facebook.com/profile.php?id=61592874008419" target="_blank" rel="noopener">Follow the story</a>
+        <a class="btn-ghost" data-link="instagram" href="https://www.instagram.com/raydizhe" target="_blank" rel="noopener">Instagram</a>
+      </p>
+    </div>
+  </section>
+
+  <!-- 2 · Первые строки пролога -->
+  <section id="first-lines" class="scene reveal">
+    <div class="wrap">
+      <h2 class="slate">SCENE 01 · FIRST LINES</h2>
+      <div class="prose">
+        <p>I was on my way to Sam's to tell him I was leaving.</p>
+        <p>Candles were burning in the room. A string of lights ran along the wall.</p>
+        <p>He was nervous. So was I — just for a different reason.</p>
+      </div>
+      <p class="meta">— from the prologue</p>
+    </div>
+  </section>
+
+  <!-- 3 · Каст -->
+  <section id="cast" class="scene reveal">
+    <div class="wrap">
+      <h2 class="slate">SCENE 02 · CAST</h2>
+      <div class="cast">
+        <figure class="cast-card">
+          <div class="cast-frame"><picture><source media="(max-width: 700px)" srcset="../shared/img/sm/sam-portrait.jpg"><img data-frame="sam" src="../shared/img/sam-portrait.jpg" alt="Close-up portrait in warm lamplight, a woman resting against his shoulder" width="850" height="1280"></picture></div>
+          <figcaption>
+            <h2>Sam</h2>
+            <p class="line">bold, magnetic, unpredictable, and far too tempting to simply forget</p>
+          </figcaption>
+        </figure>
+        <figure class="cast-card">
+          <div class="cast-frame"><picture><source media="(max-width: 700px)" srcset="../shared/img/sm/tessa-portrait.jpg"><img data-frame="tessa" src="../shared/img/tessa-portrait.jpg" alt="Close-up portrait in golden late-afternoon light, green eyes meeting the camera" width="720" height="1280"></picture></div>
+          <figcaption>
+            <h2>Tessa</h2>
+            <p class="line">has always earned everything on her own</p>
+          </figcaption>
+        </figure>
+        <figure class="cast-card">
+          <div class="cast-frame"><picture><source media="(max-width: 700px)" srcset="../shared/img/sm/ethan-portrait.jpg"><img data-frame="ethan" src="../shared/img/ethan-portrait.jpg" alt="Profile at the wheel of a vintage convertible along a coastal cliff road" width="720" height="1280"></picture></div>
+          <figcaption>
+            <h2>Ethan</h2>
+            <p class="line">calm, sincere, and charming. With him, Tessa doesn't have to pretend to be stronger than she is</p>
+          </figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 · История -->
+  <section id="story" class="scene reveal">
+    <div class="wrap">
+      <h2 class="slate">SCENE 03 · THE STORY</h2>
+      <div class="prose">
+        <p>Tessa left Boston years ago, and she left without warning.</p>
+        <p>Since then, she has built a life that's fully hers.</p>
+        <p>Now the past shows up on her doorstep, in person.</p>
+        <p>Someone new has walked into her days, and things feel easy again.</p>
+        <p>The two men pulling at her heart are bound to each other for life.</p>
+        <p>Whichever way she turns, someone she loves ends up hurt.</p>
+      </div>
+      <figure class="shot">
+        <picture><source media="(max-width: 700px)" srcset="../shared/img/sm/sam-tessa-sunset.jpg"><img data-frame="sunset" src="../shared/img/sam-tessa-sunset.jpg" alt="Tessa and Sam holding hands in a convertible above the sea at sunset, a lighthouse on the point" width="720" height="1280"></picture>
+      </figure>
+      <p class="line">Two loves.</p>
+      <p class="line">One lifelong friendship.</p>
+      <p class="line">One impossible choice.</p>
+    </div>
+  </section>
+
+  <!-- 5 · Эпизоды -->
+  <section id="episodes" class="scene reveal">
+    <div class="wrap">
+      <h2 class="slate">SCENE 04 · EPISODES</h2>
+      <p class="meta">a new one almost every day</p>
+      <div class="episodes" data-episodes>
+        <noscript>
+          <p class="meta">JavaScript is off — <a href="https://www.facebook.com/profile.php?id=61592874008419" target="_blank" rel="noopener">All episodes on Facebook</a></p>
+        </noscript>
+      </div>
+      <figure class="shot">
+        <picture><source media="(max-width: 700px)" srcset="../shared/img/sm/sam-tessa-kiss.jpg"><img data-frame="kiss" src="../shared/img/sam-tessa-kiss.jpg" alt="Sam and Tessa in a close embrace against a wall, foreheads almost touching" width="720" height="1280"></picture>
+      </figure>
+      <figure class="shot">
+        <picture><source media="(max-width: 700px)" srcset="../shared/img/sm/sam-tessa-close.jpg"><img data-frame="close" src="../shared/img/sam-tessa-close.jpg" alt="Tessa and Sam close together, faces near, lit warm" width="719" height="1280"></picture>
+      </figure>
+      <figure class="shot">
+        <picture><source media="(max-width: 700px)" srcset="../shared/img/sm/ethan-tessa-room.jpg"><img data-frame="room" src="../shared/img/ethan-tessa-room.jpg" alt="Ethan and Tessa face to face in a sunlit room" width="720" height="1280"></picture>
+      </figure>
+      <figure class="shot">
+        <picture><source media="(max-width: 700px)" srcset="../shared/img/sm/triangle.jpg"><img data-frame="triangle" src="../shared/img/triangle.jpg" alt="Tessa standing between Sam and Ethan" width="720" height="1280"></picture>
+      </figure>
+    </div>
+  </section>
+
+  <!-- 6 · Читатели -->
+  <section id="readers" class="scene reveal">
+    <div class="wrap">
+      <div class="stat">
+        <p class="stat-num" data-stat="readers">11,000+</p>
+        <p class="meta">followers across Facebook and Instagram</p>
+      </div>
+      <div class="stat">
+        <p class="stat-num" data-stat="views">500,000+</p>
+        <p class="meta">views on the episodes</p>
+      </div>
+      <p class="line">grown entirely by readers — not a cent of advertising</p>
+      <p class="meta">as of <span data-stat="asOf">September 2026</span></p>
+    </div>
+  </section>
+
+  <!-- 7 · Автор -->
+  <section id="author" class="scene reveal">
+    <div class="wrap">
+      <h2>Diana Ray</h2>
+      <p class="byline">writing as RayDi Zhe</p>
+      <div class="prose">
+        <p>I write New Adult romance filled with desire, jealousy, impossible choices, and feelings that refuse to stay quiet. My stories are for readers who believe the heart can hold more than one truth.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8 · Следующая книга -->
+  <section id="next" class="scene reveal">
+    <div class="wrap">
+      <h2 class="slate">SCENE 05 · NEXT</h2>
+      <p class="meta">Now writing</p>
+      <h2>Ridgewood, You're Not My Weakness</h2>
+      <p class="line">coming after Souls</p>
+      <figure class="shot">
+        <picture><source media="(max-width: 700px)" srcset="../shared/img/sm/sam-tessa-bed.jpg"><img data-frame="bed" src="../shared/img/sam-tessa-bed.jpg" alt="Overhead shot of a couple lying together across a bed, framed photographs on the floor behind them" width="720" height="1280"></picture>
+      </figure>
+    </div>
+  </section>
+
+  <!-- 9 · Финал -->
+  <section id="follow" class="scene reveal">
+    <div class="wrap">
+      <p>
+        <a class="btn" data-link="facebook" href="https://www.facebook.com/profile.php?id=61592874008419" target="_blank" rel="noopener">Follow the story</a>
+        <a class="btn-ghost" data-link="instagram" href="https://www.instagram.com/raydizhe" target="_blank" rel="noopener">Instagram</a>
+      </p>
+      <p class="meta"><a data-link="wattpad" href="https://www.wattpad.com/story/410771562-what-our-souls-are-made-of" target="_blank" rel="noopener">Read the prologue on Wattpad</a></p>
+      <p class="meta">© 2026 RayDi Zhe. All rights reserved.</p>
+    </div>
+  </section>
+
+</main>
+
+<script src="../shared/content.js" defer></script>
+<script src="../shared/page.js" defer></script>
+<script src="room.js" type="module"></script>
+</body>
+</html>

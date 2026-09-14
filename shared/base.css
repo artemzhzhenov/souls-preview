@@ -1,0 +1,409 @@
+/* RAYDIZHE — What Our Souls Are Made Of — общая база для трёх вариантов
+ *
+ * Тёплая темнота, как в роликах автора: глубокая тень, свет свечи, лица
+ * крупным планом. Не книжная витрина — кинокадр. Один акцентный цвет —
+ * янтарь; всё остальное держится на тоне и контрасте, не на палитре.
+ *
+ * Три голоса шрифта, и у каждого своя работа:
+ *   --display — название и заголовки сцен, крупно, редко;
+ *   --prose   — тело истории и реплики героев;
+ *   --mono    — служебное: даты, подписи, цифры, кнопки.
+ *
+ * Файл — общий каркас для a-candle/b-choice/c-credits. Фирменный приём
+ * каждого варианта (свеча, выбор, титры) сюда не входит — это Task 5–7.
+ */
+
+/* ── Шрифты ─────────────────────────────────────────────────────────────── */
+/* Файл лежит в shared/, варианты подключают его как ../shared/base.css —
+   относительные url() в @font-face считаются от этого файла, поэтому путь
+   на один уровень вверх, а не на два, как в archive/paper/styles.css. */
+@font-face {
+  font-family: "Instrument Serif"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url(../assets/fonts/instrument-400.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Instrument Serif"; font-style: italic; font-weight: 400; font-display: swap;
+  src: url(../assets/fonts/instrument-400i.woff2) format("woff2");
+}
+@font-face {
+  font-family: "EB Garamond"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url(../assets/fonts/garamond-400.woff2) format("woff2");
+}
+@font-face {
+  font-family: "EB Garamond"; font-style: italic; font-weight: 400; font-display: swap;
+  src: url(../assets/fonts/garamond-400i.woff2) format("woff2");
+}
+@font-face {
+  font-family: "EB Garamond"; font-style: normal; font-weight: 500; font-display: swap;
+  src: url(../assets/fonts/garamond-500.woff2) format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url(../assets/fonts/jetbrains-400.woff2) format("woff2");
+}
+
+/* ── Токены ─────────────────────────────────────────────────────────────── */
+:root {
+  --night: #14100D;
+  --coal: #221A15;
+  --bone: #EFE6DA;
+  --amber: #D9A05B;
+  --sam: #3A2A2A;
+  --ethan: #E8D5B5;
+
+  --display: "Instrument Serif", Georgia, serif;
+  --prose: "EB Garamond", Georgia, serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --measure: 62ch;
+  --gap: clamp(1.25rem, 3vw, 2.5rem);
+
+  color-scheme: dark; /* страница тёмная всегда — переключателя нет, пусть браузер знает */
+}
+
+/* ── Сброс ──────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; }
+h2, .title, .byline, .line, .slate, .meta, .prose p, .stat, .stat-num { margin: 0; }
+/* Кадры кладутся и напрямую, и через .shot/.cast-card — защита от горизонтального
+   скролла одна на всех, частные размеры переопределяют её по специфичности. */
+img { max-width: 100%; height: auto; display: block; }
+figure { margin: 0; } /* .shot и .cast-card в вёрстке — вероятно <figure>: гасим её дефолтный отступ */
+
+/* ── Ритм ───────────────────────────────────────────────────────────────── */
+/* Сброс выше (h2, .title, .byline, .line, .slate, .meta, .prose p, .stat,
+   .stat-num — margin: 0) убирает браузерные отступы, но ничего не ставит
+   взамен: без этого правила соседи внутри .wrap стоят вплотную (заголовок
+   садится на подпись, проза — на фото, каст — на портрет). Возвращаем ритм
+   одним местом, а не отступами в каждом компоненте — так он не разъезжается
+   между тремя вариантами. */
+.wrap > * + * {
+  margin-top: clamp(1rem, 2.5vh, 2.25rem);
+}
+/* .cast-card — не .wrap-ребёнок (лежит внутри .cast), общее правило выше
+   его не достаёт: без этого портрет актёра упирается прямо в подпись. */
+.cast-card > * + * {
+  margin-top: clamp(0.75rem, 2vh, 1.25rem);
+}
+/* Внутри подписи (имя + реплика) — тот же приём, но теснее: это одна
+   смысловая группа, ей не нужен зазор секции. :not(:first-child) вместо
+   комбинатора "+" не эстетика — по specificity: сброс бьёт .line
+   (0,1,0) классом, а простой `figcaption > * + *` даёт только (0,0,1)
+   и проигрывает, margin-top молча не применяется. Псевдокласс :not()
+   считается как класс — с ним выходит (0,1,1), и это уже перебивает. */
+figcaption > *:not(:first-child) {
+  margin-top: 0.4em;
+}
+
+a { color: inherit; }
+a:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 3px;
+}
+
+/* ── Каркас страницы ────────────────────────────────────────────────────── */
+body {
+  background: var(--night);
+  color: var(--bone);
+  font-family: var(--prose);
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+
+.scene {
+  min-height: 100svh;
+  display: grid;
+  align-content: center;
+  padding: clamp(4rem, 10vh, 8rem) var(--gap);
+  position: relative;
+  isolation: isolate;
+  /* Секция — это и есть «содержимое страницы»: поднимаем её над зерном и
+     виньеткой (body::before/::after, z-index: 1) без отдельной обёртки. */
+  z-index: 2;
+}
+
+.wrap {
+  max-width: 72rem;
+  margin-inline: auto;
+  width: 100%;
+  /* .scene — grid-контейнер, а грид-элементы по умолчанию min-width: auto:
+     негибкий контент (картинка фиксированной ширины, непереносимая строка)
+     раздвигает колонку и даёт горизонтальный скролл. Гасим это здесь одним
+     правилом, а не в каждом варианте отдельно. */
+  min-width: 0;
+}
+
+/* ── Типографика ────────────────────────────────────────────────────────── */
+.title {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: clamp(3rem, 11vw, 9rem);
+  line-height: 0.92;
+  letter-spacing: -0.01em;
+}
+
+h2 {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: clamp(2rem, 5vw, 3.5rem);
+  line-height: 1.05;
+}
+
+/* Подпись под названием — между .title и .line в списке классов не случайно:
+   это переходная строка автора/статуса, тише названия, суше реплики героя. */
+.byline {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--bone) 65%, transparent);
+}
+
+.prose p {
+  font-size: clamp(1.05rem, 1.6vw, 1.35rem);
+  line-height: 1.62;
+  max-width: var(--measure);
+}
+.prose p + p { margin-top: 1.1em; }
+
+.line {
+  font-family: var(--prose);
+  font-style: italic;
+  color: var(--amber);
+  font-size: clamp(1.3rem, 2.6vw, 2.1rem);
+  line-height: 1.3;
+}
+
+.slate,
+.meta,
+.stat-num {
+  font-family: var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+}
+
+.stat-num {
+  text-transform: none;
+  font-size: clamp(2.5rem, 7vw, 5rem);
+}
+
+/* Обёртка цифры и подписи (readers/views) — просто стопка, без своих цветов */
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35em;
+}
+
+/* ── Свет, зерно, виньетка ──────────────────────────────────────────────── */
+body::before {
+  content: "";
+  position: fixed; inset: 0; z-index: 1; pointer-events: none; opacity: .05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+body::after {
+  content: "";
+  position: fixed; inset: 0; z-index: 1; pointer-events: none;
+  background: radial-gradient(ellipse at 50% 50%, transparent 45%, color-mix(in srgb, var(--night) 55%, transparent) 100%);
+}
+
+/* Кадр автора: единое тонирование, чтобы разные фото не спорили по цвету.
+ * Вертикальные кадры (720×1280 и т. п.) — это панели и крупные планы, а не
+ * полноширинные баннеры: без ограничения ширины/высоты .shot растягивается
+ * на всю колонку .wrap, апскейлит источник и на десктопе выталкивает кнопку
+ * герой-секции за экран. object-fit: cover на img ниже кадрирует, а не
+ * искажает фото при уменьшении бокса. */
+.shot {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  width: min(28rem, 60vw);
+  height: clamp(16rem, 30svh, 24rem);
+  margin-inline: auto;
+}
+.shot img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* Бокс — широкий (448×270 на десктопе), а источники — вертикальные 9:16:
+     центр кадра (50% 50%) срезает как раз лица. Поднимаем фокус к верхней
+     трети — там у портретных кадров обычно и находятся лица. На мобильном
+     бокс уже почти квадратный (234×256), там центр не проблема, но правило
+     общее для всех размеров — так проще, а вреда на мобильном нет. */
+  object-position: 50% 25%;
+  filter: saturate(0.92) contrast(1.05);
+}
+/* sam-tessa-bed.jpg снят сверху, герои — в нижней части кадра: общий сдвиг
+   фокуса вверх (50% 25%) здесь, наоборот, обрезает их и оставляет пустой
+   потолок. Этому кадру нужен дефолтный центр. */
+.shot img[src$="sam-tessa-bed.jpg"] {
+  object-position: 50% 50%;
+}
+/* sam-tessa-close.jpg обрезан ещё в исходнике вплотную к лицу Тессы — лба
+   на кадре нет вообще, он начинается сразу с носа. Общие 25% всё равно
+   срезают её черты целиком, оставляя только прядь волос. Кадр держим от
+   самого верха источника — так в бокс попадают оба лица. */
+.shot img[src$="sam-tessa-close.jpg"] {
+  object-position: 50% 0%;
+}
+.shot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--amber) 8%, transparent),
+    color-mix(in srgb, var(--night) 55%, transparent)
+  );
+  mix-blend-mode: multiply;
+}
+
+/* ── Навигация ──────────────────────────────────────────────────────────── */
+.nav {
+  position: fixed;
+  top: 0;
+  inset-inline: 0;
+  z-index: 20; /* выше зерна/виньетки (1) и содержимого сцен (2) */
+  display: flex;
+  align-items: center;
+  gap: clamp(0.75rem, 2vw, 1.75rem);
+  padding-block: 0.9rem;
+  padding-inline: var(--gap);
+  background: color-mix(in srgb, var(--night) 70%, transparent);
+  backdrop-filter: blur(8px);
+}
+.nav a {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+  color: var(--bone);
+}
+.nav a:hover,
+.nav a:focus-visible { color: var(--amber); }
+
+@media (max-width: 599.98px) {
+  .nav {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+}
+
+/* ── Кнопки ─────────────────────────────────────────────────────────────── */
+.btn,
+.btn-ghost {
+  display: inline-block;
+  font-family: var(--mono);
+  text-transform: uppercase;
+  text-decoration: none;
+  line-height: 1;
+  padding: 0.9em 1.6em;
+  border-radius: 999px;
+  background: transparent;
+  transition: background .25s, color .25s;
+}
+.btn {
+  border: 1px solid var(--amber);
+  color: var(--amber);
+}
+/* Тень кнопки: тот же силуэт, но приглушённый — второй кнопке не положено
+   спорить с единственным акцентом сайта, поэтому рамка и текст — кость. */
+.btn-ghost {
+  border: 1px solid color-mix(in srgb, var(--bone) 55%, transparent);
+  color: color-mix(in srgb, var(--bone) 55%, transparent);
+}
+.btn:hover, .btn:focus-visible,
+.btn-ghost:hover, .btn-ghost:focus-visible {
+  background: var(--amber);
+  color: var(--night);
+}
+.btn:focus-visible,
+.btn-ghost:focus-visible {
+  outline: 2px solid var(--bone);
+  outline-offset: 3px;
+}
+
+/* ── Каст ───────────────────────────────────────────────────────────────── */
+.cast {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--gap);
+}
+.cast-card { margin: 0; }
+.cast-card img {
+  aspect-ratio: 9 / 16;
+  object-fit: cover;
+  width: 100%;
+  display: block;
+}
+
+@media (max-width: 899.98px) {
+  .cast {
+    /* Без сброса explicit-колонок карточки просто садятся в те же repeat(3,1fr)
+       и grid-auto-columns не успевает сработать — рвётся именно свайп. */
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: 78%;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+  }
+  .cast-card { scroll-snap-align: center; }
+}
+
+/* ── Эпизоды ────────────────────────────────────────────────────────────── */
+.episodes {
+  display: grid;
+  gap: 1px;
+  background: color-mix(in srgb, var(--bone) 12%, transparent); /* волосяные линии между карточками */
+}
+.episode {
+  background: var(--coal);
+  padding: clamp(1rem, 2.5vw, 1.75rem);
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: clamp(0.75rem, 2vw, 1.5rem);
+}
+/* Номер и дата эпизода в одной строке слипались вплотную на узких экранах —
+   разводим их зазором, а не пробелом в разметке. */
+.episode .meta {
+  display: flex;
+  gap: 0.5em;
+}
+/* Ссылка «watch» в ленте эпизодов — тот же .btn-ghost, но мельче: десять
+   кнопок подряд не должны звучать громче самой ленты. */
+.episode .btn-ghost {
+  font-size: 0.7rem;
+  padding: 0.6em 1.1em;
+}
+
+/* На узком экране три колонки (номер/дата, реплика, кнопка) сжимают цитату
+   до 3–5 слов в строке — лента эпизодов реально нечитаема. Спуск в один
+   столбец: то же, что читатели уже делают руками, листая с Reels. */
+@media (max-width: 599.98px) {
+  .episode {
+    grid-template-columns: 1fr;
+    justify-items: start;
+  }
+}
+
+/* ── Появление при прокрутке ────────────────────────────────────────────── */
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition: opacity .8s ease, transform .8s ease;
+}
+.reveal[data-revealed] {
+  opacity: 1;
+  transform: none;
+}
+
+/* ── Reduced-motion и чтение без JS ─────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  .reveal { opacity: 1; transform: none; }
+}
+html.no-js .reveal { opacity: 1; transform: none; }
