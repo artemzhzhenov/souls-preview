@@ -4,11 +4,11 @@
 <script>document.documentElement.classList.remove('no-js')</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What Our Souls Are Made Of — a novel by RayDi Zhe</title>
+<meta name="description" content="Two loves. One lifelong friendship. One impossible choice. A New Adult romance by RayDi Zhe — completed novel, preparing for release.">
 <!-- Превью для выбора варианта. Ссылка открывается у всех, кому её дали,
      но в поисковую выдачу страница не попадает: это черновик, а не сайт. -->
 <meta name="robots" content="noindex, nofollow">
-<title>What Our Souls Are Made Of — a novel by RayDi Zhe</title>
-<meta name="description" content="Two loves. One lifelong friendship. One impossible choice. A New Adult romance by RayDi Zhe — completed novel, preparing for release.">
 <!-- OG-адрес прибит к artemzhzhenov.xyz/souls/; при переезде домена переписать -->
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://artemzhzhenov.github.io/souls-preview/">
@@ -153,11 +153,11 @@
   <section id="readers" class="scene reveal">
     <div class="wrap">
       <div class="stat">
-        <p class="stat-num" data-stat="readers">11,000+</p>
+        <p class="stat-num" data-stat="readers">14,000+</p>
         <p class="meta">followers across Facebook and Instagram</p>
       </div>
       <div class="stat">
-        <p class="stat-num" data-stat="views">500,000+</p>
+        <p class="stat-num" data-stat="views">750,000+</p>
         <p class="meta">views on the episodes</p>
       </div>
       <p class="line">grown entirely by readers — not a cent of advertising</p>
@@ -196,6 +196,15 @@
         <a class="btn" data-link="facebook" href="https://www.facebook.com/profile.php?id=61592874008419" target="_blank" rel="noopener">Follow the story</a>
         <a class="btn-ghost" data-link="instagram" href="https://www.instagram.com/raydizhe" target="_blank" rel="noopener">Instagram</a>
       </p>
+      <!-- Видео — и фолбэк, и источник текстуры для сцены (как <img> у кадров).
+           Без autoplay и muted: автозапуск и глушение ставит scene.js, а без
+           сцены читатель включает ролик сам, со звуком, через controls.
+           preload="none" — ни байта, пока сцена не решит грузить. Ролик
+           по ширине окна выбирает scene.js из data-src / data-src-sm. -->
+      <figure class="shot shot-video">
+        <video data-frame="reel" data-src="../shared/video/reel-0091.mp4" data-src-sm="../shared/video/reel-0091-sm.mp4" src="../shared/video/reel-0091.mp4" poster="../shared/video/reel-0091-poster.jpg" preload="none" playsinline loop controls width="720" height="1280" aria-label="Teaser reel for What Our Souls Are Made Of"></video>
+      </figure>
+      <p class="sound-row"><button type="button" class="btn-ghost sound" aria-pressed="false">Sound</button></p>
       <p class="meta"><a data-link="wattpad" href="https://www.wattpad.com/story/410771562-what-our-souls-are-made-of" target="_blank" rel="noopener">Read the prologue on Wattpad</a></p>
       <p class="meta">© 2026 RayDi Zhe. All rights reserved.</p>
     </div>

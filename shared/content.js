@@ -10,9 +10,16 @@ window.SOULS = {
     instagram: "https://www.instagram.com/raydizhe",
     wattpad: "https://www.wattpad.com/story/410771562-what-our-souls-are-made-of"
   },
+  /* Сняты 16.09.2026 с открытых страниц, без входа в аккаунт:
+   *   followers — Facebook 7 776 + Instagram 6 530 = 14 306, округлено вниз;
+   *   views — сумма счётчиков просмотров на 21 ролике вкладки Reels на
+   *           Facebook, ≈756 тыс., округлено вниз. Это нижняя граница:
+   *           просмотры в Instagram без входа не видны и сюда не вошли.
+   * Цифры в разметке вариантов (текст для читателя без JS) держать равными
+   * этим. */
   audience: {
-    readers: "11,000+",
-    views: "500,000+",
+    readers: "14,000+",
+    views: "750,000+",
     asOf: "September 2026"
   },
   episodes: [

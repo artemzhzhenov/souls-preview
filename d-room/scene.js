@@ -9,7 +9,7 @@
  */
 
 import * as THREE from '../assets/vendor/three.slim.js';
-import { FRAMES, GLOW, BEATS } from './beats.js';
+import { FRAMES, GLOW, BEATS, RING, REEL } from './beats.js';
 
 const canvas = document.getElementById('room');
 
@@ -109,51 +109,76 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 120);
 camera.position.set(BEATS[0].cam[0], BEATS[0].cam[1], BEATS[0].cam[2]);
 
-/* Титул смотрит на первый кадр не в лоб, а со смещением в 23.5° — на
- * широком экране это лёгкий разворот, кадр остаётся у правого края.
- * Вертикальный FOV камеры фиксирован (42°), поэтому горизонтальный
- * целиком зависит от aspect: на портретном телефоне (390×844 из плана
- * проверки — aspect ≈ 0.46) половина горизонтального FOV — около 10°,
- * меньше самого смещения. Камера в упор смотрит мимо кадра, и «rain»
- * пропадает с телефона целиком — на прежней остановке буквально нечего
- * снимать.
+/* Точка взгляда остановки с учётом бокового сдвига aside.
  *
- * На узком экране целимся в 82% от доступной половины горизонтального
- * FOV — кадр входит в конус обзора с запасом, не впритык к краю. Полностью
- * увести яркий блик у лица из-под строки .line сдвигом одной лишь камеры
- * не вышло — при любом угле, который ещё держит кадр в кадре, тёплая
- * засветка достаёт до текста; контраст для .line в этом месте отдельно
- * поднят тенью в room.css (см. комментарий там). На широких экранах
- * (aspect ≥ опорного) исходное смещение не трогаем — там всё уже
- * выверено и работает.
+ * В beats.js look — центр кадра, aside — на сколько единиц кадр должен стоять
+ * правее центра экрана. Сдвиг откладывается влево от look вдоль
+ * горизонтальной «правой» оси камеры на этой остановке, поэтому не зависит
+ * от того, куда камера повёрнута: на титуле она смотрит вглубь по −Z, на
+ * финале — обратно по +Z, формула одна.
  *
- * aspect — не свойство устройства, а свойство текущего окна: телефон,
- * открытый в альбомной ориентации (844×390, aspect 2.16 — шире опорного
- * 1.6), проходит эту проверку не сужая смещение, а поворот в портрет
- * (390×844) меняет aspect на лету. Поэтому считаем не один раз при
- * загрузке, а функцией, которую можно звать повторно — из resize(), тем
- * же путём, каким уже пересчитывается narrow для каста. Функция также
- * обязана уметь ВЕРНУТЬ угол к исходному, если экран стал широким, — иначе
- * поворот в альбом навсегда оставил бы суженное смещение. */
-function computeTitleLookX() {
-  const REF_ASPECT = 1440 / 900;
+ * Узкий экран (< 900px по ширине окна) — другая композиция вовсе: сдвига нет,
+ * кадр стоит по центру за текстом (см. room.css), функция возвращает
+ * несдвинутую точку взгляда. Зажим до 82 % от доступной половины
+ * горизонтального угла работает только на ширине ≥ 900px и только в полосе
+ * aspect < REF_ASPECT (1440/900) — там, где горизонтальный угол уже опорного
+ * настолько, что несжатый сдвиг увёл бы точку взгляда мимо кадра. На широких
+ * экранах с aspect ≥ REF_ASPECT aside берётся как есть.
+ *
+ * aspect — свойство окна, не устройства: поворот телефона меняет его на лету.
+ * Функция чистая и зовётся из resize() на каждый поворот, поэтому поворот в
+ * альбом возвращает полный сдвиг, а не оставляет суженный навсегда. */
+const REF_ASPECT = 1440 / 900;
+const upVec = new THREE.Vector3(0, 1, 0);
+const fwdVec = new THREE.Vector3();
+const rightVec = new THREE.Vector3();
+
+function lookOf(beat, out) {
+  out.set(beat.look[0], beat.look[1], beat.look[2]);
+  const aside = beat.aside || 0;
+  if (!aside) return out;
+  // Горизонтальная проекция направления взгляда: сдвиг вбок не должен
+  // задирать или ронять точку взгляда, если камера смотрит под наклоном.
+  fwdVec.set(beat.look[0] - beat.cam[0], 0, beat.look[2] - beat.cam[2]);
+  const dist = fwdVec.length();
+  if (dist < 1e-6) return out;
+  fwdVec.divideScalar(dist);
+  let shift = aside;
+  // Узкий экран — другая композиция: кадр по центру ЗА текстом (спека,
+  // «Текст поверх полноэкранных кадров»); тот же порог 900px, что включает
+  // тени под текст в room.css. Сдвиг вбок тут только уводил бы кадр вправо:
+  // по ширине он и так шире экрана. Порог по ширине окна, а не по aspect:
+  // окно 1200×900 по CSS широкое (без теней), а по aspect — уже опорного.
+  if (window.innerWidth < 900) return out;
   const aspect0 = window.innerWidth / window.innerHeight;
-  if (aspect0 >= REF_ASPECT) return BEATS[0].look[0];
-  // THREE.MathUtils нет в слим-сборке (assets/vendor/three.slim.js) — перевод
-  // градусов в радианы руками, без обращения к несуществующему хелперу.
-  const halfV = (camera.fov / 2) * (Math.PI / 180);
-  const halfHNow = Math.atan(Math.tan(halfV) * aspect0);
-  const dx = BEATS[0].look[0] - BEATS[0].cam[0];
-  const dz = BEATS[0].look[2] - BEATS[0].cam[2];
-  const angle = halfHNow * 0.82;
-  return BEATS[0].cam[0] + Math.tan(angle) * Math.abs(dz) * Math.sign(dx);
+  if (aspect0 < REF_ASPECT) {
+    // THREE.MathUtils нет в слим-сборке (assets/vendor/three.slim.js) —
+    // перевод градусов в радианы руками.
+    const halfV = (camera.fov / 2) * (Math.PI / 180);
+    const halfH = Math.atan(Math.tan(halfV) * aspect0);
+    shift = Math.min(aside, Math.tan(halfH * 0.82) * dist);
+  }
+  rightVec.crossVectors(fwdVec, upVec);
+  return out.addScaledVector(rightVec, -shift);
 }
-const titleLook = BEATS[0].look.slice();
-titleLook[0] = computeTitleLookX();
-camera.lookAt(titleLook[0], titleLook[1], titleLook[2]);
+camera.lookAt(lookOf(BEATS[0], new THREE.Vector3()));
 
 const group = new THREE.Group();
 scene.add(group);
+
+/* Кольцо копий (см. RING в beats.js). Группа стоит в центре кольца, дети —
+ * в локальных координатах круга; масштаб группы сжимает кольцо на узком
+ * экране (resize()), вращение делается не поворотом группы, а движением
+ * детей по кругу в spinRing(): копии должны смотреть на камеру, а поворот
+ * группы ломал бы их ориентацию. */
+const ring = new THREE.Group();
+ring.position.set(RING.center[0], RING.center[1], RING.center[2]);
+scene.add(ring);
+let ringAngle = 0;
+
+/* Только для проверок из Playwright (план 2026-09-17). Код страницы этим
+ * не пользуется. */
+export const probe = { group: group, ring: ring, reel: null };
 
 /* ── Кадры ──────────────────────────────────────────────────────────────── */
 const geometry = new THREE.PlaneGeometry(1, 1);
@@ -162,6 +187,29 @@ const geometry = new THREE.PlaneGeometry(1, 1);
  * вертикали; по горизонтали пересчитывается из пропорций кадра, чтобы полоса
  * растушёвки была одинаковой ширины со всех четырёх сторон. */
 const FEATHER = 0.62;
+
+/* Материал кадра: общий для фотографий и для видео на финале.
+ * Пропорции нужны для порога растушёвки по горизонтали (см. FRAG).
+ * side задаётся только при doubleSided: THREE.FrontSide в срезе не
+ * экспортирован, а `side: undefined` Material.setValues встречает
+ * предупреждением; отсутствие ключа даёт FrontSide по умолчанию. */
+function makeMaterial(texture, aspect, doubleSided) {
+  const featherX = 1.0 - (1.0 - FEATHER) / aspect;
+  const params = {
+    vertexShader: VERT,
+    fragmentShader: FRAG,
+    uniforms: {
+      uMap: { value: texture },
+      uOpacity: { value: 1.0 },
+      uFeather: { value: new THREE.Vector2(featherX, FEATHER) },
+      uFog: uFog
+    },
+    transparent: true,
+    depthWrite: false
+  };
+  if (doubleSided) params.side = THREE.DoubleSide;
+  return new THREE.ShaderMaterial(params);
+}
 
 function makeFrame(spec, img) {
   const texture = new THREE.Texture(img);
@@ -175,21 +223,7 @@ function makeFrame(spec, img) {
   // shared/img/ не все одного формата — sam-portrait шире прочих, растягивать
   // их нельзя) и для порога растушёвки по горизонтали.
   const aspect = img.naturalWidth / img.naturalHeight;
-  const featherX = 1.0 - (1.0 - FEATHER) / aspect;
-
-  const material = new THREE.ShaderMaterial({
-    vertexShader: VERT,
-    fragmentShader: FRAG,
-    uniforms: {
-      uMap: { value: texture },
-      uOpacity: { value: 1.0 },
-      uFeather: { value: new THREE.Vector2(featherX, FEATHER) },
-      uFog: uFog
-    },
-    transparent: true,
-    depthWrite: false,
-    side: THREE.DoubleSide
-  });
+  const material = makeMaterial(texture, aspect, true);
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.scale.set(spec.height * aspect, spec.height, 1);
@@ -198,7 +232,41 @@ function makeFrame(spec, img) {
   // Помечаем каст отдельно от отсечения по дистанции в cull() — см.
   // комментарий у CAST_IDS выше.
   mesh.userData.cast = CAST_IDS.has(spec.id);
+  mesh.userData.id = spec.id;
   return mesh;
+}
+
+/* Копия кадра для кольца: та же геометрия и тот же материал, что у
+ * оригинала в коридоре, — текстура одна на двоих, лишних загрузок нет.
+ * Слот по индексу кадра в FRAMES, а не по порядку загрузки: копии не
+ * должны меняться местами от того, какая картинка доехала первой. */
+function addToRing(spec, img) {
+  const original = group.children.find(function (m) { return m.userData.id === spec.id; });
+  if (!original) return;
+  const aspect = img.naturalWidth / img.naturalHeight;
+  const copy = new THREE.Mesh(geometry, original.material);
+  copy.scale.set(RING.height * aspect, RING.height, 1);
+  copy.userData.slot = FRAMES.indexOf(spec) / FRAMES.length;
+  ring.add(copy);
+  placeRing();
+}
+
+/* Расставляет копии по кругу под текущим углом и разворачивает к камере.
+ * Группа не повёрнута и масштабирована равномерно, поэтому кватернион
+ * камеры можно копировать в детей напрямую. */
+function placeRing() {
+  for (let i = 0; i < ring.children.length; i++) {
+    const copy = ring.children[i];
+    const a = (copy.userData.slot + ringAngle) * Math.PI * 2;
+    copy.position.set(Math.cos(a) * RING.radius, 0, Math.sin(a) * RING.radius);
+    copy.quaternion.copy(camera.quaternion);
+  }
+}
+
+/* Оборот за RING.period секунд; в цикле без движения не зовётся. */
+function spinRing(dt) {
+  ringAngle = (ringAngle + dt / RING.period) % 1;
+  placeRing();
 }
 
 /* Каждый кадр встаёт в сцену сам по себе, как только его пиксели готовы.
@@ -223,6 +291,7 @@ function buildFrames() {
     wait.then(function () {
       if (!img.naturalWidth) return;
       group.add(makeFrame(spec, img));
+      addToRing(spec, img);
       const box = img.closest('.shot, .cast-frame');
       if (box) {
         box.classList.add('frame-on');
@@ -268,6 +337,117 @@ function buildGlow() {
   scene.add(mesh);
 }
 
+/* ── Видео на финале ────────────────────────────────────────────────────── */
+/* <video> из секции follow — и фолбэк, и источник текстуры, как <img> у
+ * кадров. Три правила:
+ *   1. Ни байта видео, пока читатель не доехал до «Следующей книги»: за одну
+ *      остановку до финала, не раньше — на первый экран ролик не давит.
+ *   2. Играет только пока финал на экране: телефон не греется на остановке,
+ *      где видео не видно.
+ *   3. Звук включает только кнопка. Автозапуск — всегда muted. */
+let reelVideo = null;
+let reelMesh = null;
+let followVisible = false;
+
+function syncReelPlayback() {
+  // Пока меша нет, играть нечего: до loadeddata видео — обычная фигура в
+  // вёрстке, и play() тут запустил бы её со звуком.
+  if (!reelMesh) return;
+  if (followVisible && !document.hidden) {
+    const p = reelVideo.play();
+    // Отказ в автозапуске — не ошибка сцены: фолбэк-плеер остаётся.
+    if (p && p.catch) p.catch(function () {});
+  } else {
+    reelVideo.pause();
+  }
+}
+
+function onReelReady() {
+  const video = reelVideo;
+  // Плеер и фокус отбираем только теперь, когда сцена действительно берёт
+  // видео: если файл не доехал, фигура в вёрстке остаётся полноценной.
+  video.controls = false;
+  video.tabIndex = -1;
+  const texture = new THREE.Texture(video);
+  // Мипмапы для видео не строим: генерировать их тридцать раз в секунду
+  // дорого и незачем — кадр на финале показан почти в натуральную величину.
+  texture.generateMipmaps = false;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+
+  const aspect = video.videoWidth / video.videoHeight;
+  reelMesh = new THREE.Mesh(geometry, makeMaterial(texture, aspect, false));
+  reelMesh.scale.set(REEL.height * aspect, REEL.height, 1);
+  reelMesh.position.set(REEL.pos[0], REEL.pos[1], REEL.pos[2]);
+  reelMesh.rotation.y = REEL.rotY;
+  scene.add(reelMesh);
+  probe.reel = reelMesh;
+
+  const box = video.closest('.shot-video');
+  if (box) {
+    box.classList.add('frame-on');
+    measure();
+  }
+  syncReelPlayback();
+  render();
+}
+
+function buildReel() {
+  const video = document.querySelector('video[data-frame="reel"]');
+  // Без движения видео в сцену не берём: остаётся фигурой с плеером.
+  if (!video || reduced.matches) return;
+  reelVideo = video;
+  // Звук включает только читатель. Клик — жест пользователя, браузер
+  // разрешает снять muted; сами мы этого не делаем никогда.
+  const soundBtn = document.querySelector('button.sound');
+  if (soundBtn) {
+    soundBtn.addEventListener('click', function () {
+      video.muted = !video.muted;
+      if (!video.muted) video.volume = 1;
+      soundBtn.setAttribute('aria-pressed', String(!video.muted));
+      soundBtn.textContent = video.muted ? 'Sound' : 'Mute';
+    });
+  }
+  video.addEventListener('loadeddata', onReelReady, { once: true });
+
+  // Загрузка: как только «Следующая книга» или сам финал вошли в экран.
+  // Финал тоже наблюдаем — читатель по ссылке #follow «Следующую книгу» не
+  // проходит вовсе. muted — здесь, до load(): ни один play() не должен
+  // застать видео со звуком.
+  const loader = new IntersectionObserver(function (entries) {
+    if (!entries.some(function (e) { return e.isIntersecting; })) return;
+    loader.disconnect();
+    video.muted = true;
+    // load() под preload="none" в Safari может не дойти до loadeddata —
+    // раз уж решили грузить, грузим по-настоящему. До этой строки ни байта.
+    video.preload = 'auto';
+    video.src = narrow ? video.dataset.srcSm : video.dataset.src;
+    video.load();
+  });
+  loader.observe(document.getElementById('next'));
+  loader.observe(document.getElementById('follow'));
+
+  const watcher = new IntersectionObserver(function (entries) {
+    followVisible = entries[0].isIntersecting;
+    syncReelPlayback();
+  });
+  watcher.observe(document.getElementById('follow'));
+}
+
+/* Кадр видео в текстуру и провал в темноту на шве петли. Зовётся из цикла
+ * на каждый отрисованный кадр; когда видео стоит, ничего не делает. */
+function updateReel() {
+  if (!reelMesh || reelVideo.paused || reelVideo.readyState < 2) return;
+  reelMesh.material.uniforms.uMap.value.needsUpdate = true;
+  const t = reelVideo.currentTime;
+  const d = reelVideo.duration;
+  const seam = d > 0 ? Math.max(0, Math.min(1, t / REEL.dip, (d - t) / REEL.dip)) : 1;
+  reelMesh.material.uniforms.uOpacity.value = seam;
+  // Со звуком шов слышен так же, как виден: громкость идёт за яркостью.
+  if (!reelVideo.muted) reelVideo.volume = seam;
+}
+
 /* ── Потеря контекста ───────────────────────────────────────────────────── */
 /* Браузер отбирает контекст WebGL, когда не хватает памяти или вкладка долго
  * висит в фоне, — на телефоне это не экзотика.
@@ -290,6 +470,18 @@ canvas.addEventListener('webglcontextlost', function (e) {
   document.documentElement.classList.remove('scene-on');
   const hidden = document.querySelectorAll('.frame-on');
   for (let i = 0; i < hidden.length; i++) hidden[i].classList.remove('frame-on');
+  // Видео возвращается в вёрстку плеером: controls и фокус обратно.
+  if (reelVideo) {
+    reelVideo.controls = true;
+    reelVideo.tabIndex = 0;
+    reelVideo.pause();
+    reelVideo.muted = false;
+    // Меш мёртв вместе с контекстом; без него syncReelPlayback() выходит
+    // сразу — наблюдатель #follow больше не сможет запустить play() у
+    // размьюченного видео без жеста читателя.
+    reelMesh = null;
+    probe.reel = null;
+  }
 });
 
 /* ── Пыль ───────────────────────────────────────────────────────────────── */
@@ -394,15 +586,13 @@ function resize() {
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   narrow = w < 900;
+  const s = narrow ? RING.narrowScale : 1;
+  ring.scale.set(s, s, s);
   // Поворот телефона меняет aspect так же, как первая загрузка страницы, —
-  // пересчитываем смещение взгляда титула на каждый resize(), не только
-  // один раз при старте. computeTitleLookX() объявлена выше по файлу,
-  // curveLook — ниже (создаётся из titleLook на строке её объявления), но
-  // сама mutating-запись ниже выполняется только здесь, внутри resize():
-  // к моменту первого вызова resize() (внутри start()) curveLook уже
-  // существует — resize() при загрузке модуля не вызывается ни разу.
-  titleLook[0] = computeTitleLookX();
-  curveLook.points[0].x = titleLook[0];
+  // пересчитываем сдвиги aside всех остановок на каждый resize(). curveLook
+  // объявлена ниже по файлу, но resize() при загрузке модуля не вызывается
+  // ни разу — первый вызов из start(), когда кривая уже есть.
+  for (let i = 0; i < BEATS.length; i++) lookOf(BEATS[i], curveLook.points[i]);
 }
 
 function render() {
@@ -416,14 +606,14 @@ function render() {
 const curveCam = new THREE.CatmullRomCurve3(
   BEATS.map(function (b) { return new THREE.Vector3(b.cam[0], b.cam[1], b.cam[2]); })
 );
+/* Точки взгляда — через lookOf(), не сырые BEATS[i].look: сдвиг aside и его
+ * сжатие на узком экране должны попасть в саму кривую, иначе camera.lookAt()
+ * при старте поставит камеру верно, а маршрут apply(t) при первом же скролле
+ * потянет её к несдвинутой точке. Те же объекты Vector3 перезаписываются в
+ * resize() при смене aspect — CatmullRomCurve3 читает points при каждом
+ * getPoint(), кэша нет. */
 const curveLook = new THREE.CatmullRomCurve3(
-  BEATS.map(function (b, i) {
-    // Первая точка — titleLook, пересчитанный выше под текущий aspect,
-    // не сырой BEATS[0].look: иначе кривая всё равно целится мимо кадра
-    // «rain» на портретном экране, а camera.lookAt() выше — впустую.
-    const look = i === 0 ? titleLook : b.look;
-    return new THREE.Vector3(look[0], look[1], look[2]);
-  })
+  BEATS.map(function (b) { return lookOf(b, new THREE.Vector3()); })
 );
 const LAST = BEATS.length - 1;
 
@@ -446,13 +636,13 @@ function smoothstep(e0, e1, x) {
 
 /* Положение на маршруте: целое число — ровно остановка, дробь — перегон. */
 function targetT() {
-  const probe = window.scrollY + window.innerHeight / 2;
-  if (!centers.length || probe <= centers[0]) return 0;
-  if (probe >= centers[LAST]) return LAST;
+  const scrollMid = window.scrollY + window.innerHeight / 2;
+  if (!centers.length || scrollMid <= centers[0]) return 0;
+  if (scrollMid >= centers[LAST]) return LAST;
   let i = 0;
-  while (i < LAST && probe > centers[i + 1]) i++;
+  while (i < LAST && scrollMid > centers[i + 1]) i++;
   const span = centers[i + 1] - centers[i];
-  const u = span > 0 ? (probe - centers[i]) / span : 0;
+  const u = span > 0 ? (scrollMid - centers[i]) / span : 0;
   // Камера стоит, пока секция читается, и трогается с места на четверти
   // перегона: смещение занимает оставшиеся 65% и совпадает со сменой текста.
   return i + smoothstep(0.25, 0.9, u);
@@ -497,6 +687,7 @@ let elapsed = 0;
  * 44 единицы при плотности 0.045 и 99 при 0.020. Одно число обслуживало бы
  * только одну остановку. */
 const camVec = new THREE.Vector3();
+const worldVec = new THREE.Vector3();
 
 function cull() {
   camVec.copy(camera.position);
@@ -508,6 +699,16 @@ function cull() {
     // виден и в карточке, и в пространстве одновременно. См. CAST_IDS.
     if (narrow && mesh.userData.cast) { mesh.visible = false; continue; }
     mesh.visible = mesh.position.distanceTo(camVec) < limit;
+  }
+  // Копии в кольце — дети группы со смещением и масштабом: сравнивать надо
+  // мировую позицию, локальная тут ничего не значит. Каст в кольце не
+  // гасим: карусель из вёрстки спорила с портретами в коридоре, а не с
+  // кольцом над ним.
+  ring.updateMatrixWorld();
+  for (let i = 0; i < ring.children.length; i++) {
+    const copy = ring.children[i];
+    copy.getWorldPosition(worldVec);
+    copy.visible = worldVec.distanceTo(camVec) < limit;
   }
 }
 
@@ -538,6 +739,8 @@ function frame(now) {
 
   apply(position);
   if (dust) dust.material.uniforms.uTime.value = now / 1000;
+  spinRing(dt);
+  updateReel();
   cull();
   render();
   requestAnimationFrame(frame);
@@ -559,6 +762,7 @@ function settle() {
   if (beat === staticBeat) return;
   staticBeat = beat;
   apply(beat);
+  placeRing();
   cull();
   render();
 }
@@ -589,6 +793,7 @@ document.documentElement.classList.add('scene-on');
 buildGlow();
 if (!reduced.matches) buildDust(window.innerWidth < 700 ? 250 : 600);
 buildFrames();
+buildReel();
 start();
 
 /* Страховка на поздние сдвиги вёрстки: шрифты, подгрузка, смена ориентации.
@@ -601,6 +806,7 @@ window.addEventListener('load', measure);
 document.addEventListener('visibilitychange', function () {
   if (document.hidden) {
     running = false;
+    syncReelPlayback();
     return;
   }
   if (!reduced.matches && !running) {
@@ -608,6 +814,7 @@ document.addEventListener('visibilitychange', function () {
     lastTime = performance.now();
     requestAnimationFrame(frame);
   }
+  syncReelPlayback();
 });
 
 window.addEventListener('resize', function () {
