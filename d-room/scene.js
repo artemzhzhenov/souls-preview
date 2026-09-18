@@ -9,9 +9,14 @@
  */
 
 import * as THREE from '../assets/vendor/three.slim.js';
-import { FRAMES, GLOW, BEATS, RING, REEL } from './beats.js';
+import { FRAMES, GLOW, BEATS, RING, REELS, PACE } from './beats.js';
 
 const canvas = document.getElementById('room');
+
+/* Камерой управляет JS, поэтому общее правило «animation: none» из
+ * base.css её не касается — запрос читаем сами. Объявлено в начале файла:
+ * блок указателя читает его при загрузке модуля. */
+const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
 
 /* Каст — единственное место, где кадр сцены и вёрстка спорят за одно и то
  * же фото. Ниже 900px `.cast` в shared/base.css становится свайп-каруселью
@@ -166,19 +171,236 @@ camera.lookAt(lookOf(BEATS[0], new THREE.Vector3()));
 const group = new THREE.Group();
 scene.add(group);
 
-/* Кольцо копий (см. RING в beats.js). Группа стоит в центре кольца, дети —
- * в локальных координатах круга; масштаб группы сжимает кольцо на узком
- * экране (resize()), вращение делается не поворотом группы, а движением
- * детей по кругу в spinRing(): копии должны смотреть на камеру, а поворот
- * группы ломал бы их ориентацию. */
-const ring = new THREE.Group();
-ring.position.set(RING.center[0], RING.center[1], RING.center[2]);
-scene.add(ring);
-let ringAngle = 0;
+/* ── Колёса ─────────────────────────────────────────────────────────────── */
+/* Колёс два: кадры романа на «Читателях» и ролики в финале (задача 7).
+ * Механизм один.
+ *
+ * Колесо — группа, которую каждый кадр разворачивают точно к камере, и дети
+ * на окружности в её локальной плоскости XY. Отсюда всё нужное берётся
+ * само: копии на одном расстоянии от камеры, значит одного размера, и
+ * ничего не приближается и не удаляется; крена у камеры нет, значит копии
+ * стоят вертикально; вращение читается как ход часовой стрелки.
+ *
+ * Взятость копии — одно число k от 0 до 1. Оно разом стягивает радиус к
+ * нулю (копия идёт в центр колеса), выдвигает её к камере на WHEEL_FORWARD
+ * и растит до FOCUS_FILL высоты экрана. Одно число вместо трёх анимаций:
+ * промежуточные состояния не могут разойтись между собой. */
+const WHEEL_FORWARD = 1.5;
+const FOCUS_FILL = 0.8;
+const FOCUS_RATE = 10;
+const HALF_V = (camera.fov / 2) * (Math.PI / 180);
+/* Насколько далеко от своей остановки колесо ещё рисуется. Меньше —
+ * колесо гаснет ближе к стоянке, больше — дольше висит на проезде. */
+const WHEEL_REACH = 0.75;
 
-/* Только для проверок из Playwright (план 2026-09-17). Код страницы этим
- * не пользуется. */
-export const probe = { group: group, ring: ring, reel: null };
+const wheels = [];
+
+function makeWheel(spec) {
+  const g = new THREE.Group();
+  g.position.set(spec.center[0], spec.center[1], spec.center[2]);
+  scene.add(g);
+  const w = {
+    spec: spec, group: g, angle: 0, fit: 1, spin: true,
+    // Индекс своей остановки: по нему cull() гасит колесо везде, кроме неё.
+    beatIndex: BEATS.findIndex(function (b) { return b.id === spec.beat; })
+  };
+  wheels.push(w);
+  return w;
+}
+
+const ringWheel = makeWheel(RING);
+const reelWheel = makeWheel(REELS);
+
+/* Взятая копия. Заполняет указатель (см. ниже по файлу); здесь объявлена
+ * потому, что её читают placeWheel и updateWheels. */
+let focusMesh = null;
+let lastFocus = null;
+
+/* Узкий экран сжимает колесо через fit, а не через масштаб группы:
+ * масштаб утянул бы за собой и взятую копию, и «80 % экрана» перестали бы
+ * быть восемьюдесятью. */
+function addToWheel(w, mesh, slot, height, aspect) {
+  mesh.userData.slot = slot;
+  mesh.userData.k = 0;
+  mesh.userData.height = height;
+  mesh.userData.aspect = aspect;
+  w.group.add(mesh);
+  placeWheel(w);
+}
+
+function placeWheel(w) {
+  // Развернуть колесо точно к камере: дальше локальные координаты детей —
+  // это экранные, +X вправо, +Y вверх.
+  w.group.quaternion.copy(camera.quaternion);
+  const dist = camera.position.distanceTo(w.group.position);
+  // Высота, при которой копия займёт FOCUS_FILL экрана, считается на той
+  // глубине, куда копия выходит, а не в плоскости колеса.
+  const grown = FOCUS_FILL * 2 * Math.max(0.5, dist - WHEEL_FORWARD) * Math.tan(HALF_V);
+  for (let i = 0; i < w.group.children.length; i++) {
+    const c = w.group.children[i];
+    const k = c.userData.k;
+    // Минус перед углом — вращение по часовой стрелке.
+    const a = (c.userData.slot - w.angle) * Math.PI * 2;
+    const r = w.spec.radius * w.fit * (1 - k);
+    c.position.set(Math.cos(a) * r, Math.sin(a) * r, k * WHEEL_FORWARD);
+    const base = c.userData.height * w.fit;
+    const h = base + (grown - base) * k;
+    c.scale.set(h * c.userData.aspect, h, 1);
+  }
+}
+
+/* Колесо, чью копию держат, не вращается — иначе взятый кадр уезжал бы из-под
+ * курсора. Копия с меткой pinned стоит в центре в полный размер всегда: так
+ * на узком экране показывается единственный ролик (задача 7). */
+function updateWheels(dt) {
+  const ease = 1 - Math.exp(-dt * FOCUS_RATE);
+  for (let n = 0; n < wheels.length; n++) {
+    const w = wheels[n];
+    const held = focusMesh !== null && focusMesh.parent === w.group;
+    if (w.spin && !held) w.angle = (w.angle + dt / w.spec.period) % 1;
+    for (let i = 0; i < w.group.children.length; i++) {
+      const c = w.group.children[i];
+      if (c.userData.pinned) { c.userData.k = 1; continue; }
+      const target = c === focusMesh ? 1 : 0;
+      c.userData.k += (target - c.userData.k) * ease;
+      if (Math.abs(target - c.userData.k) < 0.002) c.userData.k = target;
+    }
+    placeWheel(w);
+  }
+}
+
+/* ── Указатель ──────────────────────────────────────────────────────────── */
+/* Наведение мышью и тап делают одно и то же: берут копию из колеса. Взятая
+ * копия останавливает своё колесо, выходит в центр и вырастает до 80 %
+ * высоты экрана — всё это считает placeWheel по числу k.
+ *
+ * Три границы, без которых это мешало бы читать:
+ *   1. Отзывается только то колесо, чья остановка сейчас текущая, — иначе
+ *      кадры залипали бы на проезде мимо.
+ *   2. Указатель над ссылкой или кнопкой ничего не берёт: там курсор занят
+ *      страницей, а не сценой.
+ *   3. Прокрутка отпускает взятое: читатель поехал дальше — колесо само
+ *      вернулось к вращению.
+ *
+ * Луч пускается не на каждое движение мыши, а один раз за кадр цикла:
+ * pointermove только запоминает координаты. */
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+let pointerLive = false;
+let stickyMesh = null;
+
+function activeWheel() {
+  const beat = BEATS[Math.max(0, Math.min(LAST, Math.round(position)))];
+  for (let i = 0; i < wheels.length; i++) {
+    if (wheels[i].spec.beat === beat.id) return wheels[i];
+  }
+  return null;
+}
+
+function pick() {
+  const w = activeWheel();
+  if (!w) return null;
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(w.group.children, false);
+  for (let i = 0; i < hits.length; i++) {
+    // cull() гасит дальние копии, а Raycaster видимость сам не смотрит.
+    // pinned — единственный ролик на узком экране, он и так в полный рост.
+    if (hits[i].object.visible && !hits[i].object.userData.pinned) return hits[i].object;
+  }
+  return null;
+}
+
+/* Указатель внутри круга колеса?
+ *
+ * Нужно, чтобы взятая копия не мигала: она уходит в центр и вырастает, а
+ * указатель остаётся там, где стояла маленькая, — попадание по самой копии
+ * теряется, и без удержания она отпускала бы и забирала себя каждый кадр.
+ *
+ * Плоскость колеса перпендикулярна оси камеры и проходит через его центр,
+ * поэтому пересечение считается без THREE.Plane (его в срезе нет): идём
+ * вдоль луча до этой плоскости и переводим точку в локальные координаты
+ * группы, где круг колеса — это просто радиус от нуля. */
+const hitVec = new THREE.Vector3();
+const camFwd = new THREE.Vector3();
+const toCentre = new THREE.Vector3();
+
+function pointerInWheel(w) {
+  camera.getWorldDirection(camFwd);
+  toCentre.copy(w.group.position).sub(camera.position);
+  const denom = raycaster.ray.direction.dot(camFwd);
+  if (Math.abs(denom) < 1e-6) return false;
+  const t = toCentre.dot(camFwd) / denom;
+  if (t <= 0) return false;
+  hitVec.copy(raycaster.ray.direction).multiplyScalar(t).add(raycaster.ray.origin);
+  w.group.worldToLocal(hitVec);
+  // Полвысоты копии сверх радиуса: круг чуть шире самого колеса, чтобы у
+  // края не отпускало от дрожания руки.
+  const reach = w.spec.radius * w.fit + w.spec.height * 0.6;
+  return Math.hypot(hitVec.x, hitVec.y) <= reach;
+}
+
+function updateFocus() {
+  const w = activeWheel();
+  if (!w) { stickyMesh = null; focusMesh = null; return; }
+  if (stickyMesh) {
+    // Та же проверка, что и в ветке удержания: тапнутая копия принадлежит
+    // колесу текущей остановки, а не соседнего.
+    if (stickyMesh.parent === w.group) { focusMesh = stickyMesh; return; }
+    stickyMesh = null;
+  }
+  if (!pointerLive) { focusMesh = null; return; }
+  const hit = pick();
+  // Указали на копию — берём её, даже если сейчас держим другую.
+  if (hit) { focusMesh = hit; return; }
+  // Не попали ни по кому, но указатель ещё внутри колеса — держим взятое.
+  if (focusMesh && focusMesh.parent === w.group && pointerInWheel(w)) return;
+  focusMesh = null;
+}
+
+function overPage(e) {
+  return !!(e.target && e.target.closest && e.target.closest('a, button'));
+}
+
+function toNDC(e) {
+  pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+  pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
+}
+
+/* Слушатели ставим только когда сцена движется: при prefers-reduced-motion
+ * цикла нет, колёса стоят, и брать копии читатель не просил. */
+if (!reduced.matches) {
+  window.addEventListener('pointermove', function (e) {
+    if (e.pointerType && e.pointerType !== 'mouse') return;
+    if (overPage(e)) { pointerLive = false; return; }
+    toNDC(e);
+    pointerLive = true;
+  }, { passive: true });
+
+  // Именно document, а не window: pointerleave не всплывает, и уход
+  // курсора за край окна до window не доходит. blur — вторая страховка,
+  // на переключение вкладки или окна мимо мыши.
+  document.addEventListener('pointerleave', function () { pointerLive = false; }, { passive: true });
+  window.addEventListener('blur', function () { pointerLive = false; }, { passive: true });
+
+  // Тап: на сенсорном экране наведения нет. Тап по копии берёт её, тап мимо
+  // или по ней же — отпускает.
+  window.addEventListener('pointerdown', function (e) {
+    if (e.pointerType === 'mouse') return;
+    if (overPage(e)) return;
+    toNDC(e);
+    const hit = pick();
+    stickyMesh = (hit && hit !== stickyMesh) ? hit : null;
+  }, { passive: true });
+
+  window.addEventListener('scroll', function () { stickyMesh = null; }, { passive: true });
+}
+
+/* Только для проверок из Playwright. Читает его только проверка; сцена
+ * лишь выставляет `probe.reel`, чтобы проверке было что читать. */
+export const probe = {
+  group: group, ring: ringWheel.group, reel: null, camera: camera, wheels: wheels,
+  focusId: function () { return focusMesh ? (focusMesh.userData.id || null) : null; }
+};
 
 /* ── Кадры ──────────────────────────────────────────────────────────────── */
 const geometry = new THREE.PlaneGeometry(1, 1);
@@ -236,7 +458,7 @@ function makeFrame(spec, img) {
   return mesh;
 }
 
-/* Копия кадра для кольца: та же геометрия и тот же материал, что у
+/* Копия кадра для колеса: та же геометрия и тот же материал, что у
  * оригинала в коридоре, — текстура одна на двоих, лишних загрузок нет.
  * Слот по индексу кадра в FRAMES, а не по порядку загрузки: копии не
  * должны меняться местами от того, какая картинка доехала первой. */
@@ -245,28 +467,8 @@ function addToRing(spec, img) {
   if (!original) return;
   const aspect = img.naturalWidth / img.naturalHeight;
   const copy = new THREE.Mesh(geometry, original.material);
-  copy.scale.set(RING.height * aspect, RING.height, 1);
-  copy.userData.slot = FRAMES.indexOf(spec) / FRAMES.length;
-  ring.add(copy);
-  placeRing();
-}
-
-/* Расставляет копии по кругу под текущим углом и разворачивает к камере.
- * Группа не повёрнута и масштабирована равномерно, поэтому кватернион
- * камеры можно копировать в детей напрямую. */
-function placeRing() {
-  for (let i = 0; i < ring.children.length; i++) {
-    const copy = ring.children[i];
-    const a = (copy.userData.slot + ringAngle) * Math.PI * 2;
-    copy.position.set(Math.cos(a) * RING.radius, 0, Math.sin(a) * RING.radius);
-    copy.quaternion.copy(camera.quaternion);
-  }
-}
-
-/* Оборот за RING.period секунд; в цикле без движения не зовётся. */
-function spinRing(dt) {
-  ringAngle = (ringAngle + dt / RING.period) % 1;
-  placeRing();
+  copy.userData.id = spec.id;
+  addToWheel(ringWheel, copy, FRAMES.indexOf(spec) / FRAMES.length, RING.height, aspect);
 }
 
 /* Каждый кадр встаёт в сцену сам по себе, как только его пиксели готовы.
@@ -337,52 +539,62 @@ function buildGlow() {
   scene.add(mesh);
 }
 
-/* ── Видео на финале ────────────────────────────────────────────────────── */
-/* <video> из секции follow — и фолбэк, и источник текстуры, как <img> у
- * кадров. Три правила:
+/* ── Ролики в финале ────────────────────────────────────────────────────── */
+/* Три <video> из секции follow — и фолбэк, и источники текстур, как <img> у
+ * кадров. Правила:
  *   1. Ни байта видео, пока читатель не доехал до «Следующей книги»: за одну
- *      остановку до финала, не раньше — на первый экран ролик не давит.
- *   2. Играет только пока финал на экране: телефон не греется на остановке,
- *      где видео не видно.
- *   3. Звук включает только кнопка. Автозапуск — всегда muted. */
-let reelVideo = null;
-let reelMesh = null;
+ *      остановку до финала, не раньше — на первый экран ролики не давят.
+ *   2. Играют, только пока финал на экране: телефон не греется там, где
+ *      видео не видно.
+ *   3. Звук включает только кнопка (задача 8), и звучит только взятая копия.
+ *
+ * На узком экране в сцену идёт только первый ролик и помечается pinned:
+ * placeWheel держит такую копию в центре и в полный размер, updateWheels её
+ * не трогает, указатель не берёт. */
+const reelClips = [];
 let followVisible = false;
 
 function syncReelPlayback() {
-  // Пока меша нет, играть нечего: до loadeddata видео — обычная фигура в
-  // вёрстке, и play() тут запустил бы её со звуком.
-  if (!reelMesh) return;
-  if (followVisible && !document.hidden) {
-    const p = reelVideo.play();
-    // Отказ в автозапуске — не ошибка сцены: фолбэк-плеер остаётся.
-    if (p && p.catch) p.catch(function () {});
-  } else {
-    reelVideo.pause();
+  const held = focusMesh !== null && focusMesh.parent === reelWheel.group;
+  for (let i = 0; i < reelClips.length; i++) {
+    const clip = reelClips[i];
+    // Пока меша нет, играть нечего: до loadeddata видео — обычная фигура в
+    // вёрстке, и play() тут запустил бы её со звуком.
+    if (!clip.mesh) continue;
+    // Взяли одну копию — остальные встают: три дорожки разом не нужны
+    // никому, да и декодировать их незачем.
+    const wanted = followVisible && !document.hidden && (!held || focusMesh === clip.mesh);
+    if (wanted) {
+      const p = clip.video.play();
+      // Отказ в автозапуске — не ошибка сцены: фолбэк-плеер остаётся.
+      if (p && p.catch) p.catch(function () {});
+    } else {
+      clip.video.pause();
+    }
   }
 }
 
-function onReelReady() {
-  const video = reelVideo;
+function onReelReady(clip) {
+  const video = clip.video;
   // Плеер и фокус отбираем только теперь, когда сцена действительно берёт
   // видео: если файл не доехал, фигура в вёрстке остаётся полноценной.
   video.controls = false;
   video.tabIndex = -1;
   const texture = new THREE.Texture(video);
   // Мипмапы для видео не строим: генерировать их тридцать раз в секунду
-  // дорого и незачем — кадр на финале показан почти в натуральную величину.
+  // дорого и незачем.
   texture.generateMipmaps = false;
   texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.needsUpdate = true;
 
   const aspect = video.videoWidth / video.videoHeight;
-  reelMesh = new THREE.Mesh(geometry, makeMaterial(texture, aspect, false));
-  reelMesh.scale.set(REEL.height * aspect, REEL.height, 1);
-  reelMesh.position.set(REEL.pos[0], REEL.pos[1], REEL.pos[2]);
-  reelMesh.rotation.y = REEL.rotY;
-  scene.add(reelMesh);
-  probe.reel = reelMesh;
+  const mesh = new THREE.Mesh(geometry, makeMaterial(texture, aspect, false));
+  mesh.userData.id = video.dataset.frame;
+  if (narrow) mesh.userData.pinned = true;
+  clip.mesh = mesh;
+  addToWheel(reelWheel, mesh, clip.slot, REELS.height, aspect);
+  if (!probe.reel) probe.reel = mesh;
 
   const box = video.closest('.shot-video');
   if (box) {
@@ -394,22 +606,37 @@ function onReelReady() {
 }
 
 function buildReel() {
-  const video = document.querySelector('video[data-frame="reel"]');
-  // Без движения видео в сцену не берём: остаётся фигурой с плеером.
-  if (!video || reduced.matches) return;
-  reelVideo = video;
+  const videos = Array.prototype.slice.call(document.querySelectorAll('video[data-frame^="reel-"]'));
+  // Без движения видео в сцену не берём: остаются фигурами с плеерами.
+  if (!videos.length || reduced.matches) return;
+  const list = narrow ? videos.slice(0, 1) : videos;
+  // Ролики, которые сцена не берёт, со страницы убираем: иначе рядом с
+  // 3D-роликом стояли бы их фолбэк-плееры. Возвращаем их при потере
+  // контекста — там страница снова становится фолбэком целиком.
+  for (let i = list.length; i < videos.length; i++) {
+    const box = videos[i].closest('.shot-video');
+    if (box) box.hidden = true;
+  }
+  // Колесо из одного ролика вращать нечего и незачем.
+  reelWheel.spin = list.length > 1;
+
   // Звук включает только читатель. Клик — жест пользователя, браузер
   // разрешает снять muted; сами мы этого не делаем никогда.
   const soundBtn = document.querySelector('button.sound');
   if (soundBtn) {
     soundBtn.addEventListener('click', function () {
-      video.muted = !video.muted;
-      if (!video.muted) video.volume = 1;
-      soundBtn.setAttribute('aria-pressed', String(!video.muted));
-      soundBtn.textContent = video.muted ? 'Sound' : 'Mute';
+      soundOn = !soundOn;
+      soundBtn.setAttribute('aria-pressed', String(soundOn));
+      soundBtn.textContent = soundOn ? 'Mute' : 'Sound';
+      applySound();
     });
   }
-  video.addEventListener('loadeddata', onReelReady, { once: true });
+
+  for (let i = 0; i < list.length; i++) {
+    const clip = { video: list[i], mesh: null, slot: i / list.length };
+    reelClips.push(clip);
+    list[i].addEventListener('loadeddata', function () { onReelReady(clip); }, { once: true });
+  }
 
   // Загрузка: как только «Следующая книга» или сам финал вошли в экран.
   // Финал тоже наблюдаем — читатель по ссылке #follow «Следующую книгу» не
@@ -418,34 +645,64 @@ function buildReel() {
   const loader = new IntersectionObserver(function (entries) {
     if (!entries.some(function (e) { return e.isIntersecting; })) return;
     loader.disconnect();
-    video.muted = true;
-    // load() под preload="none" в Safari может не дойти до loadeddata —
-    // раз уж решили грузить, грузим по-настоящему. До этой строки ни байта.
-    video.preload = 'auto';
-    video.src = narrow ? video.dataset.srcSm : video.dataset.src;
-    video.load();
+    for (let i = 0; i < reelClips.length; i++) {
+      const v = reelClips[i].video;
+      v.muted = true;
+      // load() под preload="none" в Safari может не дойти до loadeddata —
+      // раз уж решили грузить, грузим по-настоящему.
+      v.preload = 'auto';
+      v.src = (narrow && v.dataset.srcSm) ? v.dataset.srcSm : v.dataset.src;
+      v.load();
+    }
   });
   loader.observe(document.getElementById('next'));
   loader.observe(document.getElementById('follow'));
 
   const watcher = new IntersectionObserver(function (entries) {
-    followVisible = entries[0].isIntersecting;
+    followVisible = entries[entries.length - 1].isIntersecting;
     syncReelPlayback();
   });
   watcher.observe(document.getElementById('follow'));
 }
 
-/* Кадр видео в текстуру и провал в темноту на шве петли. Зовётся из цикла
- * на каждый отрисованный кадр; когда видео стоит, ничего не делает. */
+/* Кадр каждого играющего ролика в текстуру и провал в темноту на шве петли.
+ * Зовётся из цикла; ролики на паузе пропускаются. */
 function updateReel() {
-  if (!reelMesh || reelVideo.paused || reelVideo.readyState < 2) return;
-  reelMesh.material.uniforms.uMap.value.needsUpdate = true;
-  const t = reelVideo.currentTime;
-  const d = reelVideo.duration;
-  const seam = d > 0 ? Math.max(0, Math.min(1, t / REEL.dip, (d - t) / REEL.dip)) : 1;
-  reelMesh.material.uniforms.uOpacity.value = seam;
-  // Со звуком шов слышен так же, как виден: громкость идёт за яркостью.
-  if (!reelVideo.muted) reelVideo.volume = seam;
+  for (let i = 0; i < reelClips.length; i++) {
+    const clip = reelClips[i];
+    const v = clip.video;
+    if (!clip.mesh || v.paused || v.readyState < 2) {
+      // Встал на паузу внутри провала петли — не оставляем его тёмным.
+      if (clip.mesh) clip.mesh.material.uniforms.uOpacity.value = 1;
+      continue;
+    }
+    clip.mesh.material.uniforms.uMap.value.needsUpdate = true;
+    const t = v.currentTime;
+    const d = v.duration;
+    // d бывает NaN, пока не пришли метаданные, — тогда провала нет.
+    const seam = d > 0 ? Math.max(0, Math.min(1, t / REELS.dip, (d - t) / REELS.dip)) : 1;
+    clip.mesh.material.uniforms.uOpacity.value = seam;
+    // Со звуком шов слышен так же, как виден: громкость идёт за яркостью.
+    if (!v.muted) v.volume = seam;
+  }
+}
+
+/* Звук — один флаг на всю сцену. Звучать может только взятая копия: три
+ * дорожки разом — каша, а у колеса из трёх роликов «включить звук» иначе
+ * ничего не значило бы. Флаг включён, но ничего не взято — тишина. */
+let soundOn = false;
+
+function applySound() {
+  for (let i = 0; i < reelClips.length; i++) {
+    const clip = reelClips[i];
+    // На узком экране единственный ролик помечен pinned: взять его
+    // указателем нельзя, и без этой оговорки кнопка звука на телефоне
+    // молчала бы. Заодно размьютирование там происходит прямо в
+    // обработчике клика, внутри жеста читателя.
+    const live = clip.mesh !== null && (clip.mesh === focusMesh || clip.mesh.userData.pinned);
+    clip.video.muted = !(soundOn && live);
+    if (!clip.video.muted) clip.video.volume = 1;
+  }
 }
 
 /* ── Потеря контекста ───────────────────────────────────────────────────── */
@@ -470,18 +727,23 @@ canvas.addEventListener('webglcontextlost', function (e) {
   document.documentElement.classList.remove('scene-on');
   const hidden = document.querySelectorAll('.frame-on');
   for (let i = 0; i < hidden.length; i++) hidden[i].classList.remove('frame-on');
-  // Видео возвращается в вёрстку плеером: controls и фокус обратно.
-  if (reelVideo) {
-    reelVideo.controls = true;
-    reelVideo.tabIndex = 0;
-    reelVideo.pause();
-    reelVideo.muted = false;
-    // Меш мёртв вместе с контекстом; без него syncReelPlayback() выходит
-    // сразу — наблюдатель #follow больше не сможет запустить play() у
-    // размьюченного видео без жеста читателя.
-    reelMesh = null;
-    probe.reel = null;
+  // Ролики возвращаются в вёрстку плеерами: controls и фокус обратно.
+  // Меши мертвы вместе с контекстом; без них syncReelPlayback() выходит
+  // сразу — наблюдатель #follow больше не сможет запустить play() у
+  // размьюченного видео без жеста читателя.
+  for (let i = 0; i < reelClips.length; i++) {
+    const v = reelClips[i].video;
+    v.controls = true;
+    v.tabIndex = 0;
+    v.pause();
+    v.muted = false;
+    reelClips[i].mesh = null;
   }
+  const parked = document.querySelectorAll('.shot-video[hidden]');
+  for (let i = 0; i < parked.length; i++) parked[i].hidden = false;
+  focusMesh = null;
+  stickyMesh = null;
+  probe.reel = null;
 });
 
 /* ── Пыль ───────────────────────────────────────────────────────────────── */
@@ -586,8 +848,9 @@ function resize() {
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   narrow = w < 900;
-  const s = narrow ? RING.narrowScale : 1;
-  ring.scale.set(s, s, s);
+  for (let i = 0; i < wheels.length; i++) {
+    wheels[i].fit = narrow ? wheels[i].spec.narrowScale : 1;
+  }
   // Поворот телефона меняет aspect так же, как первая загрузка страницы, —
   // пересчитываем сдвиги aside всех остановок на каждый resize(). curveLook
   // объявлена ниже по файлу, но resize() при загрузке модуля не вызывается
@@ -643,9 +906,9 @@ function targetT() {
   while (i < LAST && scrollMid > centers[i + 1]) i++;
   const span = centers[i + 1] - centers[i];
   const u = span > 0 ? (scrollMid - centers[i]) / span : 0;
-  // Камера стоит, пока секция читается, и трогается с места на четверти
-  // перегона: смещение занимает оставшиеся 65% и совпадает со сменой текста.
-  return i + smoothstep(0.25, 0.9, u);
+  // Камера стоит, пока секция читается, и весь проезд делает на стыке
+  // секций (PACE в beats.js) — кадр, доехав до максимума, замирает.
+  return i + smoothstep(PACE.start, PACE.end, u);
 }
 
 const camPos = new THREE.Vector3();
@@ -700,15 +963,21 @@ function cull() {
     if (narrow && mesh.userData.cast) { mesh.visible = false; continue; }
     mesh.visible = mesh.position.distanceTo(camVec) < limit;
   }
-  // Копии в кольце — дети группы со смещением и масштабом: сравнивать надо
-  // мировую позицию, локальная тут ничего не значит. Каст в кольце не
-  // гасим: карусель из вёрстки спорила с портретами в коридоре, а не с
-  // кольцом над ним.
-  ring.updateMatrixWorld();
-  for (let i = 0; i < ring.children.length; i++) {
-    const copy = ring.children[i];
-    copy.getWorldPosition(worldVec);
-    copy.visible = worldVec.distanceTo(camVec) < limit;
+  // Колесо живёт только около своей остановки. Без этого колесо кадров —
+  // оно стоит в 23 единицах и всего в 3.5° от оси взгляда финала — висело бы
+  // позади роликов, а колесо роликов так же лезло бы в «Читателей» при
+  // возврате вверх. Одного тумана мало: на финале он разрежен до 0.030
+  // ради самих роликов, и порог отсечения уходит за 60 единиц.
+  for (let n = 0; n < wheels.length; n++) {
+    const w = wheels[n];
+    const near = Math.abs(position - w.beatIndex) < WHEEL_REACH;
+    w.group.updateMatrixWorld();
+    for (let i = 0; i < w.group.children.length; i++) {
+      const c = w.group.children[i];
+      if (!near) { c.visible = false; continue; }
+      c.getWorldPosition(worldVec);
+      c.visible = worldVec.distanceTo(camVec) < limit;
+    }
   }
 }
 
@@ -739,7 +1008,15 @@ function frame(now) {
 
   apply(position);
   if (dust) dust.material.uniforms.uTime.value = now / 1000;
-  spinRing(dt);
+  updateFocus();
+  if (focusMesh !== lastFocus) {
+    lastFocus = focusMesh;
+    // Взяли ролик — остальные встают; отпустили — играют снова. Звук
+    // переезжает вместе со взятой копией.
+    syncReelPlayback();
+    applySound();
+  }
+  updateWheels(dt);
   updateReel();
   cull();
   render();
@@ -747,10 +1024,6 @@ function frame(now) {
 }
 
 /* ── Запуск ─────────────────────────────────────────────────────────────── */
-/* Камерой управляет JS, поэтому общее правило «animation: none» из
- * base.css её не касается — запрос читаем сами. */
-const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
-
 /* Без движения: камера переставляется на ближайшую остановку и сцена
  * рисуется один раз. Никакого непрерывного цикла. */
 let staticBeat = -1;
@@ -761,8 +1034,11 @@ function settle() {
   const beat = Math.round(targetT());
   if (beat === staticBeat) return;
   staticBeat = beat;
+  // Без движения позиция на маршруте не пересчитывается циклом — ставим её
+  // руками, иначе cull() сочтёт, что до остановки колеса далеко.
+  position = beat;
   apply(beat);
-  placeRing();
+  updateWheels(0);
   cull();
   render();
 }

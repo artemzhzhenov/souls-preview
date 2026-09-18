@@ -210,7 +210,18 @@ h2.slate { line-height: 1.4; }
   opacity: 0;
   pointer-events: none;
 }
-.shot-video.frame-on ~ .sound-row { display: block; }
+/* Фигуры лежат в обёртке .reels, соседский селектор до .sound-row больше не
+   дотягивается — спрашиваем у общего предка. */
+.wrap:has(.shot-video.frame-on) .sound-row { display: block; }
+
+/* Фолбэк: три вертикальных плеера в ряд на широком экране, столбиком на
+   узком. Ширина колонки ограничена — иначе на 1440 каждый плеер был бы
+   780 px высотой и финал уехал бы на три экрана. */
+.reels { display: grid; gap: var(--gap); }
+@media (min-width: 900px) {
+  .reels { grid-template-columns: repeat(3, 1fr); align-items: start; justify-items: center; }
+}
+.reels .shot.shot-video { width: 100%; max-width: 14rem; }
 
 /* .btn-ghost в base.css написан для ссылок: у <button> свой шрифт и кегль
    от браузера, наследование включаем здесь. */
