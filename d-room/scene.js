@@ -200,7 +200,15 @@ function lookOf(beat, out) {
   // тени под текст в room.css. Сдвиг вбок тут только уводил бы кадр вправо:
   // по ширине он и так шире экрана. Порог по ширине окна, а не по aspect:
   // окно 1200×900 по CSS широкое (без теней), а по aspect — уже опорного.
-  if (window.innerWidth < 900) return out;
+  //
+  // lift — единственное исключение: не вбок, а ВВЕРХ. Точка взгляда
+  // опускается на столько единиц, значит объект остановки поднимается на
+  // экране. Нужно «Автору»: куб там не кадр за текстом, а предмет, и он
+  // должен встать в пустоту НАД текстом, а не на него.
+  if (window.innerWidth < 900) {
+    if (beat.lift) out.y -= beat.lift;
+    return out;
+  }
   // THREE.MathUtils нет в слим-сборке (assets/vendor/three.slim.js) —
   // перевод градусов в радианы руками.
   const halfV = (camera.fov / 2) * (Math.PI / 180);
@@ -400,6 +408,17 @@ const cubeGroup = new THREE.Group();
 cubeGroup.position.set(CUBE.center[0], CUBE.center[1], CUBE.center[2]);
 scene.add(cubeGroup);
 const cubeBeat = BEATS.findIndex(function (b) { return b.id === CUBE.beat; });
+/* Ребро и вынос взятой грани зависят от ширины окна — см. CUBE.narrow. */
+let cubeEdge = CUBE.edge;
+let cubeForward = CUBE.forward;
+let cubeGrow = CUBE.grow;
+
+function fitCube() {
+  const n = narrow ? CUBE.narrow : null;
+  cubeEdge = n && n.edge !== undefined ? n.edge : CUBE.edge;
+  cubeForward = n && n.forward !== undefined ? n.forward : CUBE.forward;
+  cubeGrow = n && n.grow !== undefined ? n.grow : CUBE.grow;
+}
 
 const restVec = new THREE.Vector3();
 const aimVec = new THREE.Vector3();
@@ -430,19 +449,36 @@ function addToCube(spec, img) {
 }
 
 function placeCube() {
-  const half = CUBE.edge / 2;
+  const half = cubeEdge / 2;
   cubeGroup.updateMatrixWorld();
-  // Куда выходит взятая грань: на CUBE.forward навстречу камере от центра
-  // куба. Точка считается в мире и один раз переводится в локальные
-  // координаты группы — грани живут в них.
-  aimVec.copy(camera.position).sub(cubeGroup.position);
-  const len = aimVec.length();
-  if (len > 1e-6) aimVec.multiplyScalar(CUBE.forward / len);
-  aimVec.add(cubeGroup.position);
+  // Куда выходит взятая грань. Точка считается в мире и один раз
+  // переводится в локальные координаты группы — грани живут в них.
+  //
+  // На широком экране грань просто выдвигается навстречу камере, оставаясь
+  // на месте куба: там сбоку от неё текст, и уезжать ей некуда.
+  //
+  // На узком — на ось взгляда, то есть в середину экрана. Куб там поднят
+  // над текстом (lift у остановки), и грань, выросшая на месте, упиралась
+  // бы в шапку. Тап — состояние временное: фотография выходит в центр,
+  // закрывает собой текст и складывается обратно по тапу мимо.
+  const dist = camera.position.distanceTo(cubeGroup.position);
+  if (narrow) {
+    camera.getWorldDirection(camFwd);
+    aimVec.copy(camera.position).addScaledVector(camFwd, Math.max(0.5, dist - cubeForward));
+  } else {
+    aimVec.copy(camera.position).sub(cubeGroup.position);
+    const len = aimVec.length();
+    if (len > 1e-6) aimVec.multiplyScalar(cubeForward / len);
+    aimVec.add(cubeGroup.position);
+  }
   cubeGroup.worldToLocal(aimVec);
   // Поворот, при котором грань смотрит точно в камеру, — тоже в локальных
   // координатах, потому что сама группа кувыркается.
   faceAim.copy(cubeGroup.quaternion).invert().multiply(camera.quaternion);
+  // Насколько грань уже вышла: по ней на узком экране гасится остаток куба.
+  // Грань там уходит в середину экрана и занимает две трети, а куб остаётся
+  // наверху — и читается не кубом, а плоской крышкой над фотографией.
+  const held = focusMesh !== null && focusMesh.parent === cubeGroup ? focusMesh.userData.k : 0;
   for (let i = 0; i < cubeGroup.children.length; i++) {
     const c = cubeGroup.children[i];
     const k = c.userData.k;
@@ -451,10 +487,11 @@ function placeCube() {
     c.position.copy(restVec).lerp(aimVec, k);
     c.quaternion.slerpQuaternions(c.userData.rest, faceAim, k);
     // Ширина растёт в grow раз, высота — от квадрата до полного кадра.
-    const w = CUBE.edge * (1 + (CUBE.grow - 1) * k);
+    const w = cubeEdge * (1 + (cubeGrow - 1) * k);
     const h = w * (1 + (1 / c.userData.aspect - 1) * k);
     c.scale.set(w, h, 1);
     const u = c.material.uniforms;
+    u.uOpacity.value = narrow && c !== focusMesh ? 1 - 0.75 * held : 1;
     u.uCrop.value.y = c.userData.aspect + (1 - c.userData.aspect) * k;
     const fy = FACE_SOLID + (FEATHER - FACE_SOLID) * k;
     u.uFeather.value.set(1 - (1 - fy) / (w / h), fy);
@@ -516,7 +553,7 @@ function activeTarget() {
     // выходить, первая складывается — и обе зависают на полпути (поймано
     // на живой странице: k 0.51 и 0.49). У колеса такого не бывает: копии
     // лежат в одной плоскости и не заслоняют друг друга.
-    return { group: cubeGroup, reach: CUBE.edge * 1.4, hold: true };
+    return { group: cubeGroup, reach: cubeEdge * 1.4, hold: true };
   }
   for (let i = 0; i < wheels.length; i++) {
     const w = wheels[i];
@@ -1091,6 +1128,7 @@ function resize() {
   camera.updateProjectionMatrix();
   narrow = w < 900;
   for (let i = 0; i < wheels.length; i++) fitWheel(wheels[i]);
+  fitCube();
   // Поворот телефона меняет aspect так же, как первая загрузка страницы, —
   // пересчитываем сдвиги aside всех остановок на каждый resize(). curveLook
   // объявлена ниже по файлу, но resize() при загрузке модуля не вызывается
@@ -1228,14 +1266,7 @@ function cull() {
   }
   // Куб — по тому же правилу, что колёса: он висит у самой стены «Автора»,
   // и на проезде к «Следующей книге» камера проходит мимо него боком.
-  //
-  // Ниже 900px куба нет вовсе. Там сдвиг вбок не работает (lookOf() отдаёт
-  // центр кадра), и куб встаёт ровно под текстом «Автора»: и текст читается
-  // хуже, и сам куб перестаёт читаться кубом — видна одна грань в упор.
-  // Композиция для телефона отложена целиком (решение автора), и куб ждёт
-  // её вместе с остальным.
-  cubeGroup.visible = !narrow
-    && Math.abs(position - cubeBeat) < WHEEL_REACH
+  cubeGroup.visible = Math.abs(position - cubeBeat) < WHEEL_REACH
     && cubeGroup.position.distanceTo(camVec) < limit;
 }
 
