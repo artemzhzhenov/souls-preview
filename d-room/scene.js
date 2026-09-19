@@ -11,6 +11,37 @@
 import * as THREE from '../assets/vendor/three.slim.js';
 import { FRAMES, GLOW, BEATS, RING, REELS, PACE } from './beats.js';
 
+/* ── ВРЕМЕННО: три варианта первого перегона ────────────────────────────── */
+/* Титул → «Первые строки»: камера проходит в 1.5 единицы от титульного
+ * кадра, и за 18 % прокрутки кадр раздувается до 363 % высоты экрана и
+ * смахивается за левый край. Автор назвал это рывком. Три ответа лежат
+ * рядом, чтобы посмотреть их глазами; выбранный останется, остальные два и
+ * сам переключатель отсюда уйдут.
+ *
+ *   fade — кадр дорастает и тает в темноте, камера проходит сквозь пустоту;
+ *   wide — камера обходит кадр стороной, проезд втрое длиннее;
+ *   turn — камера не долетает до кадра и отворачивается вправо. */
+const INTRO = new URLSearchParams(window.location.search).get('intro') || 'fade';
+const SLOW = { start: 0.18, end: 0.82 };
+if (INTRO === 'fade') {
+  BEATS[0].pace = SLOW;
+  FRAMES[0].fadeNear = [3.6, 2.6];
+} else if (INTRO === 'wide') {
+  // Кадр уезжает влево от коридора, камера титула — вправо: расстояние до
+  // кадра прежнее (3.9), а мимо камера проходит не в 1.3 единицы, а втрое
+  // дальше.
+  BEATS[0].pace = SLOW;
+  FRAMES[0].pos = [-1.3, 0.0, -1.6];
+  BEATS[0].cam = [1.3, 0.05, 1.3];
+  BEATS[0].look = [-1.3, 0.0, -1.6];
+} else if (INTRO === 'turn') {
+  BEATS[0].pace = SLOW;
+  // Остановка не доезжает до плоскости кадра вовсе: камера подаётся вперёд
+  // на полметра и отворачивается вправо на 70°.
+  BEATS[1].cam = [0.6, 0.08, 0.6];
+  BEATS[1].look = [4.2, 0.05, -0.6];
+}
+
 const canvas = document.getElementById('room');
 
 /* Камерой управляет JS, поэтому общее правило «animation: none» из
@@ -52,6 +83,9 @@ const FRAG = `
   uniform float uOpacity;
   uniform vec2 uFeather;
   uniform float uFog;
+  // Растворение на подлёте: x — глубина, на которой кадр ещё цел, y — на
+  // которой он уже погас (y < x). Нули — растворения нет.
+  uniform vec2 uNear;
   varying vec2 vUv;
   varying float vDepth;
   void main() {
@@ -67,7 +101,8 @@ const FRAG = `
     float ax = 1.0 - smoothstep(uFeather.x, 1.0, d.x);
     float ay = 1.0 - smoothstep(uFeather.y, 1.0, d.y);
     float fog = 1.0 - exp(-uFog * uFog * vDepth * vDepth);
-    float a = ax * ay * uOpacity * (1.0 - fog);
+    float near = uNear.x > 0.0 ? smoothstep(uNear.y, uNear.x, vDepth) : 1.0;
+    float a = ax * ay * uOpacity * near * (1.0 - fog);
     if (a < 0.004) discard;
     gl_FragColor = vec4(tex.rgb, a);
   }
@@ -124,19 +159,53 @@ camera.position.set(BEATS[0].cam[0], BEATS[0].cam[1], BEATS[0].cam[2]);
  *
  * Узкий экран (< 900px по ширине окна) — другая композиция вовсе: сдвига нет,
  * кадр стоит по центру за текстом (см. room.css), функция возвращает
- * несдвинутую точку взгляда. Зажим до 82 % от доступной половины
- * горизонтального угла работает только на ширине ≥ 900px и только в полосе
- * aspect < REF_ASPECT (1440/900) — там, где горизонтальный угол уже опорного
- * настолько, что несжатый сдвиг увёл бы точку взгляда мимо кадра. На широких
- * экранах с aspect ≥ REF_ASPECT aside берётся как есть.
+ * несдвинутую точку взгляда.
+ *
+ * На ширине ≥ 900px сдвиг зажимается так, чтобы кадр ВЕСЬ остался на экране,
+ * с полем EDGE от края. Считается в углах, а не в единицах: экранная
+ * координата — это tan(угла)/tan(полуугла), и у сдвинутого вбок кадра
+ * дальний край уходит нелинейно. Отсюда формула
+ *
+ *     сдвиг ≤ dist · tan( полуугол·(1−EDGE) − atan(полуширина кадра / dist) ),
+ *
+ * то есть «сколько осталось от половины экрана, когда из неё вычли сам кадр».
+ * Прежний зажим считал долю (0.82) от половины угла и про ширину кадра не
+ * знал: на титуле кадр вылезал за правый край на 4 % при 1440×900 и на 10 %
+ * при 1197×833 — автор это и увидел. Теперь окно любой ширины даёт целый
+ * кадр, а на узких окнах сдвиг просто становится меньше.
  *
  * aspect — свойство окна, не устройства: поворот телефона меняет его на лету.
  * Функция чистая и зовётся из resize() на каждый поворот, поэтому поворот в
  * альбом возвращает полный сдвиг, а не оставляет суженный навсегда. */
-const REF_ASPECT = 1440 / 900;
+/* Поле от края экрана до кадра — доля половины горизонтального угла. */
+const EDGE = 0.04;
 const upVec = new THREE.Vector3(0, 1, 0);
 const fwdVec = new THREE.Vector3();
 const rightVec = new THREE.Vector3();
+
+/* Полуширина того, что держим в экране на этой остановке, в единицах сцены.
+ *
+ * Остановка со сдвигом смотрит в центр своего кадра, поэтому кадр ищется по
+ * точке взгляда: совпадают x и z (y у титула отличается на 0.05 — камера
+ * там чуть выше центра кадра). Пропорция 9:16 — это пропорция исходников
+ * (720×1280); единственный кадр с другой, sam 850×1280, ни на одной
+ * остановке со сдвигом не стоит. Берётся из данных, а не из меша: lookOf()
+ * зовётся при загрузке модуля, когда фотографии ещё не скачались.
+ *
+ * Финал смотрит не на кадр, а на колесо роликов — там вернётся 0, и сдвиг
+ * останется каким задан: на расстоянии 10 единиц половины экрана хватает с
+ * запасом на любом окне. */
+const FRAME_RATIO = 9 / 16;
+
+function halfWidthAt(beat) {
+  for (let i = 0; i < FRAMES.length; i++) {
+    const f = FRAMES[i];
+    if (Math.abs(f.pos[0] - beat.look[0]) < 0.05 && Math.abs(f.pos[2] - beat.look[2]) < 0.05) {
+      return f.height * FRAME_RATIO / 2;
+    }
+  }
+  return 0;
+}
 
 function lookOf(beat, out) {
   out.set(beat.look[0], beat.look[1], beat.look[2]);
@@ -148,21 +217,18 @@ function lookOf(beat, out) {
   const dist = fwdVec.length();
   if (dist < 1e-6) return out;
   fwdVec.divideScalar(dist);
-  let shift = aside;
   // Узкий экран — другая композиция: кадр по центру ЗА текстом (спека,
   // «Текст поверх полноэкранных кадров»); тот же порог 900px, что включает
   // тени под текст в room.css. Сдвиг вбок тут только уводил бы кадр вправо:
   // по ширине он и так шире экрана. Порог по ширине окна, а не по aspect:
   // окно 1200×900 по CSS широкое (без теней), а по aspect — уже опорного.
   if (window.innerWidth < 900) return out;
-  const aspect0 = window.innerWidth / window.innerHeight;
-  if (aspect0 < REF_ASPECT) {
-    // THREE.MathUtils нет в слим-сборке (assets/vendor/three.slim.js) —
-    // перевод градусов в радианы руками.
-    const halfV = (camera.fov / 2) * (Math.PI / 180);
-    const halfH = Math.atan(Math.tan(halfV) * aspect0);
-    shift = Math.min(aside, Math.tan(halfH * 0.82) * dist);
-  }
+  // THREE.MathUtils нет в слим-сборке (assets/vendor/three.slim.js) —
+  // перевод градусов в радианы руками.
+  const halfV = (camera.fov / 2) * (Math.PI / 180);
+  const halfH = Math.atan(Math.tan(halfV) * (window.innerWidth / window.innerHeight));
+  const edge = halfH * (1 - EDGE) - Math.atan(halfWidthAt(beat) / dist);
+  const shift = Math.max(0, Math.min(aside, edge > 0 ? Math.tan(edge) * dist : 0));
   rightVec.crossVectors(fwdVec, upVec);
   return out.addScaledVector(rightVec, -shift);
 }
@@ -436,7 +502,7 @@ const FEATHER = 0.62;
  * side задаётся только при doubleSided: THREE.FrontSide в срезе не
  * экспортирован, а `side: undefined` Material.setValues встречает
  * предупреждением; отсутствие ключа даёт FrontSide по умолчанию. */
-function makeMaterial(texture, aspect, doubleSided) {
+function makeMaterial(texture, aspect, doubleSided, near) {
   const featherX = 1.0 - (1.0 - FEATHER) / aspect;
   const params = {
     vertexShader: VERT,
@@ -445,6 +511,7 @@ function makeMaterial(texture, aspect, doubleSided) {
       uMap: { value: texture },
       uOpacity: { value: 1.0 },
       uFeather: { value: new THREE.Vector2(featherX, FEATHER) },
+      uNear: { value: new THREE.Vector2(near ? near[0] : 0, near ? near[1] : 0) },
       uFog: uFog
     },
     transparent: true,
@@ -466,7 +533,7 @@ function makeFrame(spec, img) {
   // shared/img/ не все одного формата — sam-portrait шире прочих, растягивать
   // их нельзя) и для порога растушёвки по горизонтали.
   const aspect = img.naturalWidth / img.naturalHeight;
-  const material = makeMaterial(texture, aspect, true);
+  const material = makeMaterial(texture, aspect, true, spec.fadeNear);
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.scale.set(spec.height * aspect, spec.height, 1);
@@ -929,7 +996,13 @@ function targetT() {
   const u = span > 0 ? (scrollMid - centers[i]) / span : 0;
   // Камера стоит, пока секция читается, и весь проезд делает на стыке
   // секций (PACE в beats.js) — кадр, доехав до максимума, замирает.
-  return i + smoothstep(PACE.start, PACE.end, u);
+  //
+  // Поле pace у остановки задаёт свой темп перегону, который из неё
+  // выходит. Нужно ровно одному перегону — титул → «Первые строки», где
+  // камера проходит вплотную к титульному кадру: на общем темпе кадр
+  // раздувался вчетверо и смахивался за левый край за 18 % прокрутки.
+  const pace = BEATS[i].pace || PACE;
+  return i + smoothstep(pace.start, pace.end, u);
 }
 
 const camPos = new THREE.Vector3();

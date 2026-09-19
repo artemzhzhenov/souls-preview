@@ -7,8 +7,7 @@
 window.SOULS = {
   links: {
     facebook: "https://www.facebook.com/profile.php?id=61592874008419",
-    instagram: "https://www.instagram.com/raydizhe",
-    wattpad: "https://www.wattpad.com/story/410771562-what-our-souls-are-made-of"
+    instagram: "https://www.instagram.com/raydizhe"
   },
   /* Сняты 18.09.2026 с открытых страниц, без входа в аккаунт:
    *   followers — Facebook 11 064 + Instagram 6 821 = 17 885, округлено вниз;
