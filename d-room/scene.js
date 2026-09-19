@@ -9,7 +9,7 @@
  */
 
 import * as THREE from '../assets/vendor/three.slim.js';
-import { FRAMES, GLOW, BEATS, RING, REELS, PACE } from './beats.js';
+import { FRAMES, GLOW, BEATS, RING, REELS, CUBE, PACE } from './beats.js';
 
 const canvas = document.getElementById('room');
 
@@ -55,10 +55,16 @@ const FRAG = `
   // Растворение на подлёте: x — глубина, на которой кадр ещё цел, y — на
   // которой он уже погас (y < x). Нули — растворения нет.
   uniform vec2 uNear;
+  // Какая доля снимка видна на плоскости, от середины. (1,1) — весь снимок;
+  // (1, 0.5625) — квадратный вырез из вертикального кадра, грань куба.
+  uniform vec2 uCrop;
   varying vec2 vUv;
   varying float vDepth;
   void main() {
-    vec4 tex = texture2D(uMap, vUv);
+    // Растушёвка считается по vUv — она принадлежит плоскости; выборка из
+    // текстуры по вырезу — снимку. Смешивать нельзя: на грани куба это
+    // разные вещи.
+    vec4 tex = texture2D(uMap, vec2(0.5) + (vUv - 0.5) * uCrop);
     // Растушёвка по каждой оси отдельно и с разными порогами.
     //
     // UV нормированы на свою сторону, а стороны у кадра 9:16 отличаются в
@@ -167,6 +173,9 @@ const rightVec = new THREE.Vector3();
 const FRAME_RATIO = 9 / 16;
 
 function halfWidthAt(beat) {
+  // «Автор» смотрит не на кадр, а на куб: половина его диагонали — самый
+  // широкий силуэт, какой он показывает, кувыркаясь.
+  if (beat.id === CUBE.beat) return CUBE.edge * Math.sqrt(3) / 2;
   for (let i = 0; i < FRAMES.length; i++) {
     const f = FRAMES[i];
     if (Math.abs(f.pos[0] - beat.look[0]) < 0.05 && Math.abs(f.pos[2] - beat.look[2]) < 0.05) {
@@ -331,6 +340,120 @@ function updateWheels(dt) {
   }
 }
 
+/* ── Куб на «Авторе» ────────────────────────────────────────────────────── */
+/* Шесть фотографий на шести гранях; куб кувыркается в тёплом пятне света.
+ * Данные — CUBE в beats.js, там же зачем он вообще нужен.
+ *
+ * Куб собран из шести плоскостей, а не из BoxGeometry: в срезе three её
+ * нет (assets/vendor/three-entry.js), а граням всё равно нужен свой
+ * материал на каждую — у каждой своя текстура, свой вырез и своя
+ * растушёвка. Плоскости односторонние (side по умолчанию FrontSide),
+ * поэтому изнанка граней не рисуется, и шесть полупрозрачных картинок не
+ * просвечивают друг сквозь друга: у выпуклого тела лицевые грани на экране
+ * не пересекаются.
+ *
+ * Взятость грани — то же одно число k от 0 до 1, что у колёс: оно разом
+ * выводит грань вперёд к читателю, доворачивает её лицом к камере,
+ * раскрывает вырез из квадрата в полный кадр, растит ширину в CUBE.grow
+ * раз и отпускает растушёвку краёв с «почти твёрдой» до обычной. Одно
+ * число вместо пяти анимаций — промежуточные состояния не разойдутся. */
+const FACE_SOLID = 0.94;
+
+/* Грани по порядку CUBE.faces: +X, −X, +Y, −Y, +Z, −Z. */
+const FACES = [
+  { pos: [ 1,  0,  0], rot: [0,  Math.PI / 2, 0] },
+  { pos: [-1,  0,  0], rot: [0, -Math.PI / 2, 0] },
+  { pos: [ 0,  1,  0], rot: [-Math.PI / 2, 0, 0] },
+  { pos: [ 0, -1,  0], rot: [ Math.PI / 2, 0, 0] },
+  { pos: [ 0,  0,  1], rot: [0, 0, 0] },
+  { pos: [ 0,  0, -1], rot: [0, Math.PI, 0] }
+];
+
+const cubeGroup = new THREE.Group();
+cubeGroup.position.set(CUBE.center[0], CUBE.center[1], CUBE.center[2]);
+scene.add(cubeGroup);
+const cubeBeat = BEATS.findIndex(function (b) { return b.id === CUBE.beat; });
+
+const restVec = new THREE.Vector3();
+const aimVec = new THREE.Vector3();
+/* Кватернионы берём клоном готового: THREE.Quaternion в срезе не
+ * экспортирован, а конструктор нам и не нужен. */
+const faceAim = cubeGroup.quaternion.clone();
+
+function addToCube(spec, img) {
+  const slot = CUBE.faces.indexOf(spec.id);
+  if (slot < 0) return;
+  const original = group.children.find(function (m) { return m.userData.id === spec.id; });
+  if (!original) return;
+  const aspect = img.naturalWidth / img.naturalHeight;
+  // Текстура общая с кадром коридора — лишних загрузок нет; материал свой.
+  const material = makeMaterial(original.material.uniforms.uMap.value, aspect, {
+    feather: FACE_SOLID, crop: [1, aspect]
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  const face = FACES[slot];
+  mesh.rotation.set(face.rot[0], face.rot[1], face.rot[2]);
+  mesh.userData.id = spec.id;
+  mesh.userData.k = 0;
+  mesh.userData.aspect = aspect;
+  mesh.userData.face = face;
+  mesh.userData.rest = mesh.quaternion.clone();
+  cubeGroup.add(mesh);
+  placeCube();
+}
+
+function placeCube() {
+  const half = CUBE.edge / 2;
+  cubeGroup.updateMatrixWorld();
+  // Куда выходит взятая грань: на CUBE.forward навстречу камере от центра
+  // куба. Точка считается в мире и один раз переводится в локальные
+  // координаты группы — грани живут в них.
+  aimVec.copy(camera.position).sub(cubeGroup.position);
+  const len = aimVec.length();
+  if (len > 1e-6) aimVec.multiplyScalar(CUBE.forward / len);
+  aimVec.add(cubeGroup.position);
+  cubeGroup.worldToLocal(aimVec);
+  // Поворот, при котором грань смотрит точно в камеру, — тоже в локальных
+  // координатах, потому что сама группа кувыркается.
+  faceAim.copy(cubeGroup.quaternion).invert().multiply(camera.quaternion);
+  for (let i = 0; i < cubeGroup.children.length; i++) {
+    const c = cubeGroup.children[i];
+    const k = c.userData.k;
+    const ax = c.userData.face.pos;
+    restVec.set(ax[0] * half, ax[1] * half, ax[2] * half);
+    c.position.copy(restVec).lerp(aimVec, k);
+    c.quaternion.slerpQuaternions(c.userData.rest, faceAim, k);
+    // Ширина растёт в grow раз, высота — от квадрата до полного кадра.
+    const w = CUBE.edge * (1 + (CUBE.grow - 1) * k);
+    const h = w * (1 + (1 / c.userData.aspect - 1) * k);
+    c.scale.set(w, h, 1);
+    const u = c.material.uniforms;
+    u.uCrop.value.y = c.userData.aspect + (1 - c.userData.aspect) * k;
+    const fy = FACE_SOLID + (FEATHER - FACE_SOLID) * k;
+    u.uFeather.value.set(1 - (1 - fy) / (w / h), fy);
+  }
+}
+
+function updateCube(dt) {
+  const held = focusMesh !== null && focusMesh.parent === cubeGroup;
+  if (!held) {
+    const turn = dt * Math.PI * 2;
+    // Остаток по кругу: за час страницы угол иначе уходит в тысячи радиан,
+    // и шаг float перестаёт быть мелким.
+    cubeGroup.rotation.x = (cubeGroup.rotation.x + CUBE.spin[0] * turn) % (Math.PI * 2);
+    cubeGroup.rotation.y = (cubeGroup.rotation.y + CUBE.spin[1] * turn) % (Math.PI * 2);
+    cubeGroup.rotation.z = (cubeGroup.rotation.z + CUBE.spin[2] * turn) % (Math.PI * 2);
+  }
+  const ease = 1 - Math.exp(-dt * FOCUS_RATE);
+  for (let i = 0; i < cubeGroup.children.length; i++) {
+    const c = cubeGroup.children[i];
+    const target = c === focusMesh ? 1 : 0;
+    c.userData.k += (target - c.userData.k) * ease;
+    if (Math.abs(target - c.userData.k) < 0.002) c.userData.k = target;
+  }
+  placeCube();
+}
+
 /* ── Указатель ──────────────────────────────────────────────────────────── */
 /* Наведение мышью и тап делают одно и то же: берут копию из колеса. Взятая
  * копия останавливает своё колесо, выходит в центр и вырастает до 80 %
@@ -351,19 +474,31 @@ const pointer = new THREE.Vector2();
 let pointerLive = false;
 let stickyMesh = null;
 
-function activeWheel() {
+/* Что на текущей остановке отзывается на указатель: колесо копий, колесо
+ * роликов или куб. Возвращается группа и радиус удержания вокруг её
+ * центра — дальше всё одинаково, откуда бы объект ни был. */
+function activeTarget() {
   const beat = BEATS[Math.max(0, Math.min(LAST, Math.round(position)))];
+  if (beat.id === CUBE.beat) {
+    // Полдиагонали куба плюс запас: взятая грань выходит вперёд и шире
+    // самого куба, указателю есть где дрожать.
+    return { group: cubeGroup, reach: CUBE.edge * 1.4 };
+  }
   for (let i = 0; i < wheels.length; i++) {
-    if (wheels[i].spec.beat === beat.id) return wheels[i];
+    const w = wheels[i];
+    if (w.spec.beat === beat.id) {
+      // Полвысоты копии сверх радиуса: круг чуть шире самого колеса.
+      return { group: w.group, reach: w.spec.radius * w.fit + w.spec.height * 0.6 };
+    }
   }
   return null;
 }
 
 function pick() {
-  const w = activeWheel();
-  if (!w) return null;
+  const t = activeTarget();
+  if (!t) return null;
   raycaster.setFromCamera(pointer, camera);
-  const hits = raycaster.intersectObjects(w.group.children, false);
+  const hits = raycaster.intersectObjects(t.group.children, false);
   for (let i = 0; i < hits.length; i++) {
     // cull() гасит дальние копии, а Raycaster видимость сам не смотрит.
     // pinned — единственный ролик на узком экране, он и так в полный рост.
@@ -372,50 +507,45 @@ function pick() {
   return null;
 }
 
-/* Указатель внутри круга колеса?
+/* Указатель рядом с центром колеса или куба?
  *
- * Нужно, чтобы взятая копия не мигала: она уходит в центр и вырастает, а
- * указатель остаётся там, где стояла маленькая, — попадание по самой копии
+ * Нужно, чтобы взятое не мигало: оно уходит в центр и вырастает, а
+ * указатель остаётся там, где стояла маленькая копия, — попадание по ней
  * теряется, и без удержания она отпускала бы и забирала себя каждый кадр.
  *
- * Плоскость колеса перпендикулярна оси камеры и проходит через его центр,
- * поэтому пересечение считается без THREE.Plane (его в срезе нет): идём
- * вдоль луча до этой плоскости и переводим точку в локальные координаты
- * группы, где круг колеса — это просто радиус от нуля. */
+ * Плоскость проверки перпендикулярна оси камеры и проходит через центр
+ * группы, поэтому пересечение считается без THREE.Plane (его в срезе нет):
+ * идём вдоль луча до этой плоскости и меряем расстояние от центра. */
 const hitVec = new THREE.Vector3();
 const camFwd = new THREE.Vector3();
 const toCentre = new THREE.Vector3();
 
-function pointerInWheel(w) {
+function pointerNear(target) {
   camera.getWorldDirection(camFwd);
-  toCentre.copy(w.group.position).sub(camera.position);
+  toCentre.copy(target.group.position).sub(camera.position);
   const denom = raycaster.ray.direction.dot(camFwd);
   if (Math.abs(denom) < 1e-6) return false;
   const t = toCentre.dot(camFwd) / denom;
   if (t <= 0) return false;
   hitVec.copy(raycaster.ray.direction).multiplyScalar(t).add(raycaster.ray.origin);
-  w.group.worldToLocal(hitVec);
-  // Полвысоты копии сверх радиуса: круг чуть шире самого колеса, чтобы у
-  // края не отпускало от дрожания руки.
-  const reach = w.spec.radius * w.fit + w.spec.height * 0.6;
-  return Math.hypot(hitVec.x, hitVec.y) <= reach;
+  return hitVec.distanceTo(target.group.position) <= target.reach;
 }
 
 function updateFocus() {
-  const w = activeWheel();
-  if (!w) { stickyMesh = null; focusMesh = null; return; }
+  const t = activeTarget();
+  if (!t) { stickyMesh = null; focusMesh = null; return; }
   if (stickyMesh) {
-    // Та же проверка, что и в ветке удержания: тапнутая копия принадлежит
-    // колесу текущей остановки, а не соседнего.
-    if (stickyMesh.parent === w.group) { focusMesh = stickyMesh; return; }
+    // Та же проверка, что и в ветке удержания: тапнутое принадлежит
+    // объекту текущей остановки, а не соседней.
+    if (stickyMesh.parent === t.group) { focusMesh = stickyMesh; return; }
     stickyMesh = null;
   }
   if (!pointerLive) { focusMesh = null; return; }
   const hit = pick();
-  // Указали на копию — берём её, даже если сейчас держим другую.
+  // Указали на копию или грань — берём, даже если сейчас держим другую.
   if (hit) { focusMesh = hit; return; }
-  // Не попали ни по кому, но указатель ещё внутри колеса — держим взятое.
-  if (focusMesh && focusMesh.parent === w.group && pointerInWheel(w)) return;
+  // Не попали ни по кому, но указатель ещё рядом — держим взятое.
+  if (focusMesh && focusMesh.parent === t.group && pointerNear(t)) return;
   focusMesh = null;
 }
 
@@ -461,6 +591,7 @@ if (!reduced.matches) {
  * лишь выставляет `probe.reel`, чтобы проверке было что читать. */
 export const probe = {
   group: group, ring: ringWheel.group, reel: null, camera: camera, wheels: wheels,
+  cube: cubeGroup,
   focusId: function () { return focusMesh ? (focusMesh.userData.id || null) : null; }
 };
 
@@ -477,22 +608,27 @@ const FEATHER = 0.62;
  * side задаётся только при doubleSided: THREE.FrontSide в срезе не
  * экспортирован, а `side: undefined` Material.setValues встречает
  * предупреждением; отсутствие ключа даёт FrontSide по умолчанию. */
-function makeMaterial(texture, aspect, doubleSided, near) {
-  const featherX = 1.0 - (1.0 - FEATHER) / aspect;
+function makeMaterial(texture, aspect, opts) {
+  const o = opts || {};
+  const feather = o.feather === undefined ? FEATHER : o.feather;
+  const near = o.near;
+  const crop = o.crop || [1, 1];
+  const featherX = 1.0 - (1.0 - feather) / aspect;
   const params = {
     vertexShader: VERT,
     fragmentShader: FRAG,
     uniforms: {
       uMap: { value: texture },
       uOpacity: { value: 1.0 },
-      uFeather: { value: new THREE.Vector2(featherX, FEATHER) },
+      uFeather: { value: new THREE.Vector2(featherX, feather) },
       uNear: { value: new THREE.Vector2(near ? near[0] : 0, near ? near[1] : 0) },
+      uCrop: { value: new THREE.Vector2(crop[0], crop[1]) },
       uFog: uFog
     },
     transparent: true,
     depthWrite: false
   };
-  if (doubleSided) params.side = THREE.DoubleSide;
+  if (o.doubleSided) params.side = THREE.DoubleSide;
   return new THREE.ShaderMaterial(params);
 }
 
@@ -508,7 +644,7 @@ function makeFrame(spec, img) {
   // shared/img/ не все одного формата — sam-portrait шире прочих, растягивать
   // их нельзя) и для порога растушёвки по горизонтали.
   const aspect = img.naturalWidth / img.naturalHeight;
-  const material = makeMaterial(texture, aspect, true, spec.fadeNear);
+  const material = makeMaterial(texture, aspect, { doubleSided: true, near: spec.fadeNear });
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.scale.set(spec.height * aspect, spec.height, 1);
@@ -557,6 +693,7 @@ function buildFrames() {
       if (!img.naturalWidth) return;
       group.add(makeFrame(spec, img));
       addToRing(spec, img);
+      addToCube(spec, img);
       const box = img.closest('.shot, .cast-frame');
       if (box) {
         box.classList.add('frame-on');
@@ -652,7 +789,7 @@ function onReelReady(clip) {
   texture.needsUpdate = true;
 
   const aspect = video.videoWidth / video.videoHeight;
-  const mesh = new THREE.Mesh(geometry, makeMaterial(texture, aspect, false));
+  const mesh = new THREE.Mesh(geometry, makeMaterial(texture, aspect, {}));
   mesh.userData.id = video.dataset.frame;
   if (narrow) mesh.userData.pinned = true;
   clip.mesh = mesh;
@@ -1046,6 +1183,17 @@ function cull() {
       c.visible = worldVec.distanceTo(camVec) < limit;
     }
   }
+  // Куб — по тому же правилу, что колёса: он висит у самой стены «Автора»,
+  // и на проезде к «Следующей книге» камера проходит мимо него боком.
+  //
+  // Ниже 900px куба нет вовсе. Там сдвиг вбок не работает (lookOf() отдаёт
+  // центр кадра), и куб встаёт ровно под текстом «Автора»: и текст читается
+  // хуже, и сам куб перестаёт читаться кубом — видна одна грань в упор.
+  // Композиция для телефона отложена целиком (решение автора), и куб ждёт
+  // её вместе с остальным.
+  cubeGroup.visible = !narrow
+    && Math.abs(position - cubeBeat) < WHEEL_REACH
+    && cubeGroup.position.distanceTo(camVec) < limit;
 }
 
 function budget(dt) {
@@ -1084,6 +1232,7 @@ function frame(now) {
     applySound();
   }
   updateWheels(dt);
+  updateCube(dt);
   updateReel();
   cull();
   render();
@@ -1106,6 +1255,7 @@ function settle() {
   position = beat;
   apply(beat);
   updateWheels(0);
+  updateCube(0);
   cull();
   render();
 }
