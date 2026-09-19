@@ -199,8 +199,12 @@ function makeWheel(spec) {
   const g = new THREE.Group();
   g.position.set(spec.center[0], spec.center[1], spec.center[2]);
   scene.add(g);
+  const tilt = (spec.tilt || 0) * (Math.PI / 180);
   const w = {
     spec: spec, group: g, angle: 0, fit: 1, spin: true,
+    // Наклон круга разложен один раз: в placeWheel он нужен каждый кадр на
+    // каждую копию, а меняться ему неоткуда — это число раскадровки.
+    cosTilt: Math.cos(tilt), sinTilt: Math.sin(tilt),
     // Индекс своей остановки: по нему cull() гасит колесо везде, кроме неё.
     beatIndex: BEATS.findIndex(function (b) { return b.id === spec.beat; })
   };
@@ -230,7 +234,9 @@ function addToWheel(w, mesh, slot, height, aspect) {
 
 function placeWheel(w) {
   // Развернуть колесо точно к камере: дальше локальные координаты детей —
-  // это экранные, +X вправо, +Y вверх.
+  // это экранные, +X вправо, +Y вверх, +Z на зрителя. Наклон круга живёт
+  // внутри этих координат (см. ниже), а не в повороте группы: иначе копии
+  // перестали бы стоять вертикально.
   w.group.quaternion.copy(camera.quaternion);
   const dist = camera.position.distanceTo(w.group.position);
   // Высота, при которой копия займёт FOCUS_FILL экрана, считается на той
@@ -242,7 +248,17 @@ function placeWheel(w) {
     // Минус перед углом — вращение по часовой стрелке.
     const a = (c.userData.slot - w.angle) * Math.PI * 2;
     const r = w.spec.radius * w.fit * (1 - k);
-    c.position.set(Math.cos(a) * r, Math.sin(a) * r, k * WHEEL_FORWARD);
+    // Круг наклонён на spec.tilt: часть хода уходит из вертикали в глубину,
+    // и копии проходят одна перед другой — это и есть карусель. Наклон 0
+    // вернул бы плоское колесо, 90 — горизонтальную карусель целиком.
+    // Радиус гаснет с k, поэтому взятая копия приходит ровно в центр, а
+    // оставшийся сдвиг по z — тот самый выход к камере, из которого
+    // посчитан grown.
+    c.position.set(
+      Math.cos(a) * r,
+      Math.sin(a) * r * w.cosTilt,
+      Math.sin(a) * r * w.sinTilt + k * WHEEL_FORWARD
+    );
     const base = c.userData.height * w.fit;
     const h = base + (grown - base) * k;
     c.scale.set(h * c.userData.aspect, h, 1);
