@@ -599,34 +599,34 @@ function toNDC(e) {
   pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
 }
 
-/* Слушатели ставим только когда сцена движется: при prefers-reduced-motion
- * цикла нет, колёса стоят, и брать копии читатель не просил. */
-if (!reduced.matches) {
-  window.addEventListener('pointermove', function (e) {
-    if (e.pointerType && e.pointerType !== 'mouse') return;
-    if (overPage(e)) { pointerLive = false; return; }
-    toNDC(e);
-    pointerLive = true;
-  }, { passive: true });
+/* Слушатели ставим всегда, в том числе при prefers-reduced-motion: взять
+ * копию — действие самого читателя, а не самоход сцены. Раньше их там не
+ * было, и на айфоне с «Уменьшением движения» тап по фотографии не делал
+ * ничего (поймано автором на живом телефоне). */
+window.addEventListener('pointermove', function (e) {
+  if (e.pointerType && e.pointerType !== 'mouse') return;
+  if (overPage(e)) { pointerLive = false; return; }
+  toNDC(e);
+  pointerLive = true;
+}, { passive: true });
 
-  // Именно document, а не window: pointerleave не всплывает, и уход
-  // курсора за край окна до window не доходит. blur — вторая страховка,
-  // на переключение вкладки или окна мимо мыши.
-  document.addEventListener('pointerleave', function () { pointerLive = false; }, { passive: true });
-  window.addEventListener('blur', function () { pointerLive = false; }, { passive: true });
+// Именно document, а не window: pointerleave не всплывает, и уход
+// курсора за край окна до window не доходит. blur — вторая страховка,
+// на переключение вкладки или окна мимо мыши.
+document.addEventListener('pointerleave', function () { pointerLive = false; }, { passive: true });
+window.addEventListener('blur', function () { pointerLive = false; }, { passive: true });
 
-  // Тап: на сенсорном экране наведения нет. Тап по копии берёт её, тап мимо
-  // или по ней же — отпускает.
-  window.addEventListener('pointerdown', function (e) {
-    if (e.pointerType === 'mouse') return;
-    if (overPage(e)) return;
-    toNDC(e);
-    const hit = pick();
-    stickyMesh = (hit && hit !== stickyMesh) ? hit : null;
-  }, { passive: true });
+// Тап: на сенсорном экране наведения нет. Тап по копии берёт её, тап мимо
+// или по ней же — отпускает.
+window.addEventListener('pointerdown', function (e) {
+  if (e.pointerType === 'mouse') return;
+  if (overPage(e)) return;
+  toNDC(e);
+  const hit = pick();
+  stickyMesh = (hit && hit !== stickyMesh) ? hit : null;
+}, { passive: true });
 
-  window.addEventListener('scroll', function () { stickyMesh = null; }, { passive: true });
-}
+window.addEventListener('scroll', function () { stickyMesh = null; }, { passive: true });
 
 /* Только для проверок из Playwright. Читает его только проверка; сцена
  * лишь выставляет `probe.reel`, чтобы проверке было что читать. */
@@ -1309,12 +1309,45 @@ function onStaticScroll() {
   requestAnimationFrame(settle);
 }
 
+/* Тихий цикл: prefers-reduced-motion.
+ *
+ * Выключено самое «укачивающее» — проезд камеры: она по-прежнему просто
+ * переставляется на ближайшую остановку при прокрутке (settle), без
+ * сглаживания и без промежуточных кадров. Пыль тоже стоит: её время не
+ * трогаем.
+ *
+ * А колесо, куб и видео живут. Причина не в трактовке стандарта, а в том,
+ * что без них страница на телефоне с этой настройкой разваливается: кадры
+ * замирают колонкой друг под другом, и читатель видит ленту фотографий
+ * вместо карусели (автор поймал это на своём айфоне). Движение здесь
+ * мелкое, на одном месте и не связано с прокруткой. */
+function quietFrame(now) {
+  if (!running || !alive) return;
+  const dt = Math.min(0.05, (now - lastTime) / 1000 || 0);
+  lastTime = now;
+  updateFocus();
+  if (focusMesh !== lastFocus) {
+    lastFocus = focusMesh;
+    syncReelPlayback();
+    applySound();
+  }
+  updateWheels(dt);
+  updateCube(dt);
+  updateReel();
+  cull();
+  render();
+  requestAnimationFrame(quietFrame);
+}
+
 function start() {
   measure();
   resize();
   if (reduced.matches) {
     settle();
     window.addEventListener('scroll', onStaticScroll, { passive: true });
+    running = true;
+    lastTime = performance.now();
+    requestAnimationFrame(quietFrame);
     return;
   }
   position = targetT();
