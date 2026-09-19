@@ -157,6 +157,12 @@ h2.slate { line-height: 1.4; }
 @media (max-width: 899.98px) {
   #story .prose p,
   #episodes .episode,
+  /* «Читатели»: на узком экране колесо стоит вертикальной колонкой ровно
+     под цифрами (см. RING.narrow в beats.js), на широком оно высоко над
+     коридором и текста не касается. */
+  #readers .stat-num,
+  #readers .line,
+  #readers .meta,
   #next h2:not(.slate),
   #next .line,
   #follow .meta {

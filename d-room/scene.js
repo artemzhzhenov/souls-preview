@@ -251,7 +251,9 @@ function makeWheel(spec) {
   scene.add(g);
   const tilt = (spec.tilt || 0) * (Math.PI / 180);
   const w = {
-    spec: spec, group: g, angle: 0, fit: 1, spin: true,
+    spec: spec, group: g, angle: 0, spin: true,
+    // Размеры и раскладка зависят от ширины окна — считает fitWheel().
+    radius: spec.radius, height: spec.height, period: spec.period, roll: false, every: 1,
     // Наклон круга разложен один раз: в placeWheel он нужен каждый кадр на
     // каждую копию, а меняться ему неоткуда — это число раскадровки.
     // tilt считается от горизонтали (см. beats.js), поэтому по вертикали
@@ -265,6 +267,18 @@ function makeWheel(spec) {
   return w;
 }
 
+/* Узкий экран может дать колесу другие числа и другую раскладку — поле
+ * narrow у колеса (см. RING в beats.js). Чистая функция, зовётся из
+ * resize() на каждый поворот телефона. */
+function fitWheel(w) {
+  const n = narrow ? w.spec.narrow : null;
+  w.radius = n && n.radius !== undefined ? n.radius : w.spec.radius;
+  w.height = n && n.height !== undefined ? n.height : w.spec.height;
+  w.period = n && n.period !== undefined ? n.period : w.spec.period;
+  w.every = n && n.every !== undefined ? n.every : 1;
+  w.roll = !!(n && n.roll);
+}
+
 const ringWheel = makeWheel(RING);
 const reelWheel = makeWheel(REELS);
 
@@ -276,10 +290,12 @@ let lastFocus = null;
 /* Узкий экран сжимает колесо через fit, а не через масштаб группы:
  * масштаб утянул бы за собой и взятую копию, и «80 % экрана» перестали бы
  * быть восемьюдесятью. */
-function addToWheel(w, mesh, slot, height, aspect) {
+function addToWheel(w, mesh, slot, index, aspect) {
   mesh.userData.slot = slot;
   mesh.userData.k = 0;
-  mesh.userData.height = height;
+  // Номер копии по порядку кадров: по нему cull() прореживает колесо на
+  // узком экране (поле every).
+  mesh.userData.index = index;
   mesh.userData.aspect = aspect;
   w.group.add(mesh);
   placeWheel(w);
@@ -300,7 +316,18 @@ function placeWheel(w) {
     const k = c.userData.k;
     // Минус перед углом — вращение по часовой стрелке.
     const a = (c.userData.slot - w.angle) * Math.PI * 2;
-    const r = w.spec.radius * w.fit * (1 - k);
+    const r = w.radius * (1 - k);
+    if (w.roll) {
+      // Колесо, катящееся на читателя (узкий экран): круг стоит в
+      // вертикальной плоскости вдоль взгляда, вбок копии не расходятся
+      // вовсе. Косинус в глубину, а не в ширину, — копия проходит сверху
+      // вниз через ближнюю точку и уходит вглубь.
+      c.position.set(0, Math.sin(a) * r, Math.cos(a) * r + k * WHEEL_FORWARD);
+      const base = w.height;
+      const h = base + (grown - base) * k;
+      c.scale.set(h * c.userData.aspect, h, 1);
+      continue;
+    }
     // Круг карусели лежит плашмя и приподнят к зрителю на spec.tilt: по
     // ширине экрана ход полный, по высоте сжат наклоном, остальное уходит
     // в глубину — отсюда пологий эллипс и то, что копии проходят одна
@@ -314,7 +341,7 @@ function placeWheel(w) {
       Math.sin(a) * r * w.leanY,
       -Math.sin(a) * r * w.leanZ + k * WHEEL_FORWARD
     );
-    const base = c.userData.height * w.fit;
+    const base = w.height;
     const h = base + (grown - base) * k;
     c.scale.set(h * c.userData.aspect, h, 1);
   }
@@ -328,7 +355,7 @@ function updateWheels(dt) {
   for (let n = 0; n < wheels.length; n++) {
     const w = wheels[n];
     const held = focusMesh !== null && focusMesh.parent === w.group;
-    if (w.spin && !held) w.angle = (w.angle + dt / w.spec.period) % 1;
+    if (w.spin && !held) w.angle = (w.angle + dt / w.period) % 1;
     for (let i = 0; i < w.group.children.length; i++) {
       const c = w.group.children[i];
       if (c.userData.pinned) { c.userData.k = 1; continue; }
@@ -495,7 +522,7 @@ function activeTarget() {
     const w = wheels[i];
     if (w.spec.beat === beat.id) {
       // Полвысоты копии сверх радиуса: круг чуть шире самого колеса.
-      return { group: w.group, reach: w.spec.radius * w.fit + w.spec.height * 0.6 };
+      return { group: w.group, reach: w.radius + w.height * 0.6 };
     }
   }
   return null;
@@ -681,7 +708,8 @@ function addToRing(spec, img) {
   const aspect = img.naturalWidth / img.naturalHeight;
   const copy = new THREE.Mesh(geometry, original.material);
   copy.userData.id = spec.id;
-  addToWheel(ringWheel, copy, FRAMES.indexOf(spec) / FRAMES.length, RING.height, aspect);
+  const index = FRAMES.indexOf(spec);
+  addToWheel(ringWheel, copy, index / FRAMES.length, index, aspect);
 }
 
 /* Каждый кадр встаёт в сцену сам по себе, как только его пиксели готовы.
@@ -807,7 +835,7 @@ function onReelReady(clip) {
   mesh.userData.id = video.dataset.frame;
   if (narrow) mesh.userData.pinned = true;
   clip.mesh = mesh;
-  addToWheel(reelWheel, mesh, clip.slot, REELS.height, aspect);
+  addToWheel(reelWheel, mesh, clip.slot, clip.index, aspect);
   if (!probe.reel) probe.reel = mesh;
 
   const box = video.closest('.shot-video');
@@ -847,7 +875,7 @@ function buildReel() {
   }
 
   for (let i = 0; i < list.length; i++) {
-    const clip = { video: list[i], mesh: null, slot: i / list.length };
+    const clip = { video: list[i], mesh: null, slot: i / list.length, index: i };
     reelClips.push(clip);
     list[i].addEventListener('loadeddata', function () { onReelReady(clip); }, { once: true });
   }
@@ -1062,9 +1090,7 @@ function resize() {
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   narrow = w < 900;
-  for (let i = 0; i < wheels.length; i++) {
-    wheels[i].fit = narrow ? wheels[i].spec.narrowScale : 1;
-  }
+  for (let i = 0; i < wheels.length; i++) fitWheel(wheels[i]);
   // Поворот телефона меняет aspect так же, как первая загрузка страницы, —
   // пересчитываем сдвиги aside всех остановок на каждый resize(). curveLook
   // объявлена ниже по файлу, но resize() при загрузке модуля не вызывается
@@ -1193,6 +1219,9 @@ function cull() {
     for (let i = 0; i < w.group.children.length; i++) {
       const c = w.group.children[i];
       if (!near) { c.visible = false; continue; }
+      // Прореживание: на узком экране колесо показывает каждую every-ю
+      // копию (см. RING.narrow в beats.js).
+      if (w.every > 1 && c.userData.index % w.every) { c.visible = false; continue; }
       c.getWorldPosition(worldVec);
       c.visible = worldVec.distanceTo(camVec) < limit;
     }
