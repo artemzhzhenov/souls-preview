@@ -121,7 +121,7 @@ camera.position.set(BEATS[0].cam[0], BEATS[0].cam[1], BEATS[0].cam[2]);
 /* Точка взгляда остановки с учётом бокового сдвига aside.
  *
  * В beats.js look — центр кадра, aside — на сколько единиц кадр должен стоять
- * правее центра экрана. Сдвиг откладывается влево от look вдоль
+ * правее центра экрана; отрицательный aside ставит кадр левее центра. Сдвиг откладывается влево от look вдоль
  * горизонтальной «правой» оси камеры на этой остановке, поэтому не зависит
  * от того, куда камера повёрнута: на титуле она смотрит вглубь по −Z, на
  * финале — обратно по +Z, формула одна.
@@ -197,7 +197,13 @@ function lookOf(beat, out) {
   const halfV = (camera.fov / 2) * (Math.PI / 180);
   const halfH = Math.atan(Math.tan(halfV) * (window.innerWidth / window.innerHeight));
   const edge = halfH * (1 - EDGE) - Math.atan(halfWidthAt(beat) / dist);
-  const shift = Math.max(0, Math.min(aside, edge > 0 ? Math.tan(edge) * dist : 0));
+  const room = edge > 0 ? Math.tan(edge) * dist : 0;
+  // Знак aside — сторона: плюс справа от центра, минус слева. Зажим один и
+  // тот же, считается по модулю. Значение заведомо больше зажима (например
+  // −2.2 у «Первых строк») — это способ сказать «прижать к краю»: сколько
+  // бы ни было места на этом окне, кадр встанет вплотную к краю с полем
+  // EDGE и целиком.
+  const shift = Math.sign(aside) * Math.min(Math.abs(aside), room);
   rightVec.crossVectors(fwdVec, upVec);
   return out.addScaledVector(rightVec, -shift);
 }
